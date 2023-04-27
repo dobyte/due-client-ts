@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+
+</body>
+<script type="module">
+    import { Client } from '../dist/index.esm.js';
+
+    const buffer = JSON.stringify({
+        Account: 'due',
+        Password: '123456',
+        Nickname: 'fuxiao',
+        Age: 31
+    });
+
+    const client = new Client({
+        url: 'ws://127.0.0.1:3553',
+        byteOrder: 'little',
+        seqBytesLen: 2,
+        routeBytesLen: 2,
+    });
+
+    // 监听连接
+    client.onConnect(async () => {
+        console.log('connect');
+
+        client.request(1, buffer, 2000).then((message) => {
+            console.log('resolve', message);
+        }).catch(() => {
+            console.log('reject');
+        });
+    });
+
+    // 监听连接断开
+    client.onDisconnect(() => {
+        console.log('disconnect');
+    });
+
+    client.connect();
+
+    console.log(client);
+</script>
+
+</html>

@@ -1,0 +1,38 @@
+{
+  "name": "due-client",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./dist/index.js",
+  "module": "./dist/index.esm.js",
+  "umd": "./dist/index.umd.js",
+  "types": "./dist/types/index.d.ts",
+  "scripts": {
+    "clean:dist": "rimraf dist",
+    "build:types": "npm run clean:dist && tsc -b ./tsconfig.types.json",
+    "build": "npm run build:types && rollup -c",
+    "test": "node test/test.js",
+    "pretest": "npm run build"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@babel/plugin-transform-runtime": "^7.21.4",
+    "@babel/preset-env": "^7.21.4",
+    "@rollup/plugin-babel": "^6.0.3",
+    "@rollup/plugin-commonjs": "^24.1.0",
+    "@rollup/plugin-node-resolve": "^15.0.2",
+    "@rollup/plugin-typescript": "^11.1.0",
+    "@types/bytebuffer": "^5.0.44",
+    "rimraf": "^5.0.0",
+    "rollup-plugin-polyfill-node": "^0.12.0",
+    "rollup-plugin-terser": "^7.0.2",
+    "rollup-plugin-typescript2": "^0.34.1"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "bytebuffer": "^5.0.1",
+    "requirejs": "^2.3.6"
+  }
+}
