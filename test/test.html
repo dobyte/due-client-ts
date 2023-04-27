@@ -12,7 +12,7 @@
 
 </body>
 <script type="module">
-    import { Client } from '../dist/index.esm.js';
+    import { Client, Packer } from '../dist/index.esm.js';
 
     const buffer = JSON.stringify({
         Account: 'due',
@@ -23,9 +23,12 @@
 
     const client = new Client({
         url: 'ws://127.0.0.1:3553',
-        byteOrder: 'little',
-        seqBytesLen: 2,
-        routeBytesLen: 2,
+        heartbeat: 10000,
+        packer: new Packer({
+            byteOrder: 'little',
+            seqBytesLen: 2,
+            routeBytesLen: 2,
+        })
     });
 
     // 监听连接

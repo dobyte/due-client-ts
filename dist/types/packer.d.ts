@@ -9,12 +9,10 @@ export interface Message {
     buffer: any;
 }
 export declare class Packer {
-    private options;
+    private opts;
     private buffer;
-    private unpacker;
-    constructor(options?: PackerOptions);
+    constructor(opts?: PackerOptions);
+    empty(): ArrayBuffer;
     pack(message: Message): ArrayBuffer;
     unpack(data: any): Message | undefined;
-    append(data: any): Packer;
-    read(): Message;
 }

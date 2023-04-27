@@ -26,6 +26,14 @@ export class Packer {
     }
 
     /**
+     * 空包
+     * @returns ArrayBuffer
+     */
+    public empty(): ArrayBuffer {
+        return this.buffer.clone().flip().toArrayBuffer();
+    }
+
+    /**
      * 打包消息
      * @param message 消息数据
      * @returns ArrayBuffer

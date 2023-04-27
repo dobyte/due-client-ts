@@ -6383,26 +6383,29 @@ var bytebufferNode = function () {
 var ByteBuffer = /*@__PURE__*/getDefaultExportFromCjs(bytebufferNode);
 
 var Packer = /*#__PURE__*/function () {
-  function Packer(options) {
+  function Packer(opts) {
     _classCallCheck(this, Packer);
-    _defineProperty(this, "options", void 0);
+    _defineProperty(this, "opts", void 0);
     _defineProperty(this, "buffer", void 0);
-    _defineProperty(this, "unpacker", void 0);
-    this.options = options === undefined ? {
+    this.opts = opts || {
+      byteOrder: 'little',
       seqBytesLen: 2,
       routeBytesLen: 2
-    } : options;
-    var littleEndian = this.options.byteOrder !== undefined && this.options.byteOrder === 'little';
-    this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, littleEndian, ByteBuffer.DEFAULT_NOASSERT);
-    this.unpacker = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, littleEndian, ByteBuffer.DEFAULT_NOASSERT);
+    };
+    this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder == 'little', ByteBuffer.DEFAULT_NOASSERT);
   }
   _createClass(Packer, [{
+    key: "empty",
+    value: function empty() {
+      return this.buffer.clone().flip().toArrayBuffer();
+    }
+  }, {
     key: "pack",
     value: function pack(message) {
       var buffer = this.buffer.clone();
       var seq = message.seq || 0;
       var route = message.route || 0;
-      switch (this.options.seqBytesLen) {
+      switch (this.opts.seqBytesLen) {
         case 1:
           buffer.writeInt8(seq);
           break;
@@ -6413,7 +6416,7 @@ var Packer = /*#__PURE__*/function () {
           buffer.writeInt32(seq);
           break;
       }
-      switch (this.options.routeBytesLen) {
+      switch (this.opts.routeBytesLen) {
         case 1:
           buffer.writeInt8(route);
           break;
@@ -6437,11 +6440,11 @@ var Packer = /*#__PURE__*/function () {
         buffer: undefined
       };
       var len = buffer.remaining();
-      if (this.options.seqBytesLen) {
-        if (this.options.seqBytesLen > buffer.remaining()) {
+      if (this.opts.seqBytesLen) {
+        if (this.opts.seqBytesLen > buffer.remaining()) {
           return;
         }
-        switch (this.options.seqBytesLen) {
+        switch (this.opts.seqBytesLen) {
           case 1:
             message.seq = buffer.readInt8();
             break;
@@ -6452,13 +6455,13 @@ var Packer = /*#__PURE__*/function () {
             message.seq = buffer.readInt32();
             break;
         }
-        len -= this.options.seqBytesLen;
+        len -= this.opts.seqBytesLen;
       }
-      if (this.options.routeBytesLen) {
-        if (this.options.routeBytesLen > buffer.remaining()) {
+      if (this.opts.routeBytesLen) {
+        if (this.opts.routeBytesLen > buffer.remaining()) {
           return;
         }
-        switch (this.options.routeBytesLen) {
+        switch (this.opts.routeBytesLen) {
           case 1:
             message.route = buffer.readInt8();
             break;
@@ -6469,27 +6472,12 @@ var Packer = /*#__PURE__*/function () {
             message.route = buffer.readInt32();
             break;
         }
-        len -= this.options.routeBytesLen;
+        len -= this.opts.routeBytesLen;
       }
       if (len > 0) {
         message.buffer = buffer.readBytes(len);
       }
       return message;
-    }
-  }, {
-    key: "append",
-    value: function append(data) {
-      this.unpacker.append(data);
-      return this;
-    }
-  }, {
-    key: "read",
-    value: function read() {
-      return {
-        seq: 0,
-        route: 1,
-        buffer: ''
-      };
     }
   }]);
   return Packer;
@@ -6501,17 +6489,15 @@ var Client = /*#__PURE__*/function () {
     _defineProperty(this, "connectHandler", void 0);
     _defineProperty(this, "disconnectHandler", void 0);
     _defineProperty(this, "receiveHandler", void 0);
+    _defineProperty(this, "errorHandler", void 0);
     _defineProperty(this, "opts", void 0);
     _defineProperty(this, "websocket", void 0);
+    _defineProperty(this, "intervalId", void 0);
     _defineProperty(this, "packer", void 0);
     _defineProperty(this, "waitgroup", void 0);
     this.opts = opts;
     this.websocket = undefined;
-    this.packer = new Packer({
-      byteOrder: opts.byteOrder,
-      seqBytesLen: opts.seqBytesLen,
-      routeBytesLen: opts.routeBytesLen
-    });
+    this.packer = opts.packer || new Packer();
     this.waitgroup = new Map();
   }
   _createClass(Client, [{
@@ -6519,22 +6505,24 @@ var Client = /*#__PURE__*/function () {
     value: function connect() {
       var _this = this;
       try {
+        this.disconnect();
         this.websocket = new WebSocket(this.opts.url);
         this.websocket.binaryType = 'arraybuffer';
         this.websocket.onopen = function (ev) {
+          _this.heartbeat();
           _this.connectHandler && _this.connectHandler();
         };
         this.websocket.onclose = function (ev) {
           _this.disconnectHandler && _this.disconnectHandler();
         };
-        this.websocket.onerror = function (ev) {};
+        this.websocket.onerror = function (ev) {
+          _this.errorHandler && _this.errorHandler();
+        };
         this.websocket.onmessage = function (e) {
           if (e.data.byteLength == 0) {
             return;
           }
-          console.log(e.data);
           var message = _this.packer.unpack(e.data);
-          console.log(message);
           message && (_this.invoke(message) || _this.receiveHandler && _this.receiveHandler(message));
         };
         return true;
@@ -6549,6 +6537,8 @@ var Client = /*#__PURE__*/function () {
       if (!this.websocket) {
         return;
       }
+      this.intervalId && clearInterval(this.intervalId);
+      this.intervalId = null;
       var websocket = this.websocket;
       this.websocket = undefined;
       websocket.onclose;
@@ -6558,6 +6548,18 @@ var Client = /*#__PURE__*/function () {
       websocket.onclose = onempty;
       websocket.onerror = onempty;
       websocket.close();
+    }
+  }, {
+    key: "heartbeat",
+    value: function heartbeat() {
+      var _this2 = this;
+      if (!this.opts.heartbeat || this.opts.heartbeat <= 0) {
+        return;
+      }
+      var data = this.packer.empty();
+      this.intervalId = setInterval(function () {
+        _this2.isConnected() && _this2.websocket && _this2.websocket.send(data);
+      }, this.opts.heartbeat);
     }
   }, {
     key: "onConnect",
@@ -6575,6 +6577,11 @@ var Client = /*#__PURE__*/function () {
       this.receiveHandler = handler;
     }
   }, {
+    key: "onError",
+    value: function onError(handler) {
+      this.errorHandler = handler;
+    }
+  }, {
     key: "isConnected",
     value: function isConnected() {
       return this.websocket !== undefined && this.websocket.readyState == WebSocket.OPEN;
@@ -6589,7 +6596,6 @@ var Client = /*#__PURE__*/function () {
     value: function send(message) {
       if (this.isConnected()) {
         var data = this.packer.pack(message);
-        console.log(data);
         this.websocket && this.websocket.send(data);
         return true;
       }
@@ -6598,29 +6604,33 @@ var Client = /*#__PURE__*/function () {
   }, {
     key: "request",
     value: function request(route, buffer, timeout) {
-      var _this2 = this;
+      var _this3 = this;
       return new Promise(function (resolve, reject) {
-        if (_this2.isConnected()) {
-          var group = _this2.waitgroup.get(route);
+        if (_this3.isConnected()) {
+          var group = _this3.waitgroup.get(route);
           if (group === undefined) {
             group = {
               seq: 0,
               callback: new Map()
             };
-            _this2.waitgroup.set(route, group);
+            _this3.waitgroup.set(route, group);
           }
           var seq = ++group.seq;
+          var timeoutId;
+          if (timeout && timeout > 0) {
+            timeoutId = setTimeout(function () {
+              reject();
+            }, timeout);
+          }
           group.callback.set(seq, function (message) {
+            timeoutId && clearTimeout(timeoutId);
             resolve(message);
           });
-          _this2.send({
+          _this3.send({
             seq: seq,
             route: route,
             buffer: buffer
           });
-          timeout && timeout > 0 && setTimeout(function () {
-            reject();
-          }, timeout);
         } else {
           reject();
         }
@@ -6645,4 +6655,4 @@ var Client = /*#__PURE__*/function () {
   return Client;
 }();
 
-export { Client };
+export { Client, Packer };

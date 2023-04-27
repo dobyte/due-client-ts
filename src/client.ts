@@ -6,6 +6,8 @@ export interface ClientOptions {
     url: string;
     // 打包器
     packer: Packer;
+    // 心跳间隔，大于0则开启心跳
+    heartbeat: number;
 }
 
 export interface ConnectHandler {
@@ -37,6 +39,8 @@ export class Client {
     private opts: ClientOptions;
     // websocket
     private websocket?: WebSocket;
+    // 定时器ID
+    private intervalId: any;
     // 打包器
     private packer: Packer;
     // 同步等待组
@@ -44,6 +48,7 @@ export class Client {
         seq: number;
         callback: Map<number, (message: Message) => void>
     }>;
+
 
     public constructor(opts: ClientOptions) {
         this.opts = opts;
@@ -58,11 +63,16 @@ export class Client {
      */
     public connect(): boolean {
         try {
+            this.disconnect();
+
+            // 新建WS客户端
             this.websocket = new WebSocket(this.opts.url);
             this.websocket.binaryType = 'arraybuffer';
 
             // 监听WS连接打开
             this.websocket.onopen = (ev: Event) => {
+                this.heartbeat();
+
                 this.connectHandler && this.connectHandler();
             }
 
@@ -103,6 +113,8 @@ export class Client {
             return
         }
 
+        this.intervalId && clearInterval(this.intervalId);
+        this.intervalId = null;
         const websocket = this.websocket;
         this.websocket = undefined;
         const onclose = websocket.onclose;
@@ -112,6 +124,22 @@ export class Client {
         websocket.onclose = onempty;
         websocket.onerror = onempty;
         websocket.close();
+    }
+
+    /**
+     * 启动心跳
+     * @returns void
+     */
+    private heartbeat() {
+        if (!this.opts.heartbeat || this.opts.heartbeat <= 0) {
+            return;
+        }
+
+        const data = this.packer.empty();
+
+        this.intervalId = setInterval(() => {
+            this.isConnected() && this.websocket && this.websocket.send(data);
+        }, this.opts.heartbeat);
     }
 
     /**
