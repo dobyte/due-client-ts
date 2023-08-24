@@ -1,12 +1,12 @@
 import ByteBuffer from 'bytebuffer';
 
 export interface PackerOptions {
-    // 字节序；默认为little
+    // 字节序；默认为big
     byteOrder?: string;
     // 序列号字节长度（字节），长度为0时不开启序列号编码；默认为2字节，最大值为65535
-    seqBytesLen?: number;
+    seqBytes?: number;
     // 路由字节长度（字节）；默认为2字节，最大值为65535
-    routeBytesLen?: number;
+    routeBytes?: number;
 }
 
 export interface Message {
@@ -15,22 +15,35 @@ export interface Message {
     buffer: any;
 }
 
+export interface Packet {
+    // 是否是心跳包
+    isHeartbeat: boolean;
+    // 心跳包携带的服务器时间（毫秒）
+    millisecond?: number;
+    // 消息数据
+    message?: Message;
+}
+
 export class Packer {
     private opts: PackerOptions;
     private buffer: any;
 
     public constructor(opts?: PackerOptions) {
-        this.opts = opts || { byteOrder: 'little', seqBytesLen: 2, routeBytesLen: 2 };
-
-        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder == 'little', ByteBuffer.DEFAULT_NOASSERT);
+        this.opts = opts || { byteOrder: 'big', seqBytes: 2, routeBytes: 2 };
+        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != 'big', ByteBuffer.DEFAULT_NOASSERT);
     }
 
     /**
-     * 空包
+     * 打包心跳
      * @returns ArrayBuffer
      */
-    public empty(): ArrayBuffer {
-        return this.buffer.clone().flip().toArrayBuffer();
+    public packHeartbeat(): ArrayBuffer {
+        let buffer = this.buffer.clone();
+        let opcode = 1 << 7;
+
+        buffer.writeInt8(opcode);
+
+        return buffer.flip().toArrayBuffer();
     }
 
     /**
@@ -38,12 +51,15 @@ export class Packer {
      * @param message 消息数据
      * @returns ArrayBuffer
      */
-    public pack(message: Message): ArrayBuffer {
-        const buffer = this.buffer.clone();
-        const seq = message.seq || 0;
-        const route = message.route || 0;
+    public packMessage(message: Message): ArrayBuffer {
+        let buffer = this.buffer.clone();
+        let opcode = 0;
+        let seq = message.seq || 0;
+        let route = message.route || 0;
 
-        switch (this.opts.seqBytesLen) {
+        buffer.writeInt8(opcode);
+
+        switch (this.opts.seqBytes) {
             case 1:
                 buffer.writeInt8(seq);
                 break;
@@ -55,7 +71,7 @@ export class Packer {
                 break;
         }
 
-        switch (this.opts.routeBytesLen) {
+        switch (this.opts.routeBytes) {
             case 1:
                 buffer.writeInt8(route);
                 break;
@@ -75,58 +91,65 @@ export class Packer {
     /**
      * 解包消息
      * @param data 二进制数据
-     * @returns Message | undefined
+     * @returns Message
      */
-    public unpack(data: any): Message | undefined {
+    public unpack(data: any): Packet {
         const buffer = this.buffer.clone().append(data, 'binary').flip();
-        const message = { seq: 0, route: 0, buffer: undefined };
+        const opcode = buffer.readUint8();
+        const isHeartbeat = opcode >> 7 == 1;
 
-        let len = buffer.remaining();
+        if (isHeartbeat) {
+            let millisecond
 
-        if (this.opts.seqBytesLen) {
-            if (this.opts.seqBytesLen > buffer.remaining()) {
-                return;
+            if (buffer.remaining() > 0) {
+                millisecond = buffer.readUint64().toNumber();
             }
 
-            switch (this.opts.seqBytesLen) {
-                case 1:
-                    message.seq = buffer.readInt8();
-                    break;
-                case 2:
-                    message.seq = buffer.readInt16();
-                    break;
-                case 4:
-                    message.seq = buffer.readInt32();
-                    break;
+            return { isHeartbeat, millisecond };
+        } else {
+            const message = { seq: 0, route: 0, buffer: undefined }
+
+            if (this.opts.seqBytes) {
+                if (this.opts.seqBytes > buffer.remaining()) {
+                    return { isHeartbeat };
+                }
+
+                switch (this.opts.seqBytes) {
+                    case 1:
+                        message.seq = buffer.readInt8();
+                        break;
+                    case 2:
+                        message.seq = buffer.readInt16();
+                        break;
+                    case 4:
+                        message.seq = buffer.readInt32();
+                        break;
+                }
             }
 
-            len -= this.opts.seqBytesLen;
+            if (this.opts.routeBytes) {
+                if (this.opts.routeBytes > buffer.remaining()) {
+                    return { isHeartbeat };
+                }
+
+                switch (this.opts.routeBytes) {
+                    case 1:
+                        message.route = buffer.readInt8();
+                        break;
+                    case 2:
+                        message.route = buffer.readInt16();
+                        break;
+                    case 4:
+                        message.route = buffer.readInt32();
+                        break;
+                }
+            }
+
+            if (buffer.remaining() > 0) {
+                message.buffer = buffer.readBytes(buffer.remaining());
+            }
+
+            return { isHeartbeat, message };
         }
-
-        if (this.opts.routeBytesLen) {
-            if (this.opts.routeBytesLen > buffer.remaining()) {
-                return;
-            }
-
-            switch (this.opts.routeBytesLen) {
-                case 1:
-                    message.route = buffer.readInt8();
-                    break;
-                case 2:
-                    message.route = buffer.readInt16();
-                    break;
-                case 4:
-                    message.route = buffer.readInt32();
-                    break;
-            }
-
-            len -= this.opts.routeBytesLen;
-        }
-
-        if (len > 0) {
-            message.buffer = buffer.readBytes(len);
-        }
-
-        return message;
     }
 }

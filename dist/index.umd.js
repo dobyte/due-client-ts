@@ -6394,24 +6394,29 @@
       _defineProperty(this, "opts", void 0);
       _defineProperty(this, "buffer", void 0);
       this.opts = opts || {
-        byteOrder: 'little',
-        seqBytesLen: 2,
-        routeBytesLen: 2
+        byteOrder: 'big',
+        seqBytes: 2,
+        routeBytes: 2
       };
-      this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder == 'little', ByteBuffer.DEFAULT_NOASSERT);
+      this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != 'big', ByteBuffer.DEFAULT_NOASSERT);
     }
     _createClass(Packer, [{
-      key: "empty",
-      value: function empty() {
-        return this.buffer.clone().flip().toArrayBuffer();
+      key: "packHeartbeat",
+      value: function packHeartbeat() {
+        var buffer = this.buffer.clone();
+        var opcode = 1 << 7;
+        buffer.writeInt8(opcode);
+        return buffer.flip().toArrayBuffer();
       }
     }, {
-      key: "pack",
-      value: function pack(message) {
+      key: "packMessage",
+      value: function packMessage(message) {
         var buffer = this.buffer.clone();
+        var opcode = 0;
         var seq = message.seq || 0;
         var route = message.route || 0;
-        switch (this.opts.seqBytesLen) {
+        buffer.writeInt8(opcode);
+        switch (this.opts.seqBytes) {
           case 1:
             buffer.writeInt8(seq);
             break;
@@ -6422,7 +6427,7 @@
             buffer.writeInt32(seq);
             break;
         }
-        switch (this.opts.routeBytesLen) {
+        switch (this.opts.routeBytes) {
           case 1:
             buffer.writeInt8(route);
             break;
@@ -6440,50 +6445,67 @@
       key: "unpack",
       value: function unpack(data) {
         var buffer = this.buffer.clone().append(data, 'binary').flip();
-        var message = {
-          seq: 0,
-          route: 0,
-          buffer: undefined
-        };
-        var len = buffer.remaining();
-        if (this.opts.seqBytesLen) {
-          if (this.opts.seqBytesLen > buffer.remaining()) {
-            return;
+        var opcode = buffer.readUint8();
+        var isHeartbeat = opcode >> 7 == 1;
+        if (isHeartbeat) {
+          var millisecond;
+          if (buffer.remaining() > 0) {
+            millisecond = buffer.readUint64().toNumber();
           }
-          switch (this.opts.seqBytesLen) {
-            case 1:
-              message.seq = buffer.readInt8();
-              break;
-            case 2:
-              message.seq = buffer.readInt16();
-              break;
-            case 4:
-              message.seq = buffer.readInt32();
-              break;
+          return {
+            isHeartbeat: isHeartbeat,
+            millisecond: millisecond
+          };
+        } else {
+          var message = {
+            seq: 0,
+            route: 0,
+            buffer: undefined
+          };
+          if (this.opts.seqBytes) {
+            if (this.opts.seqBytes > buffer.remaining()) {
+              return {
+                isHeartbeat: isHeartbeat
+              };
+            }
+            switch (this.opts.seqBytes) {
+              case 1:
+                message.seq = buffer.readInt8();
+                break;
+              case 2:
+                message.seq = buffer.readInt16();
+                break;
+              case 4:
+                message.seq = buffer.readInt32();
+                break;
+            }
           }
-          len -= this.opts.seqBytesLen;
+          if (this.opts.routeBytes) {
+            if (this.opts.routeBytes > buffer.remaining()) {
+              return {
+                isHeartbeat: isHeartbeat
+              };
+            }
+            switch (this.opts.routeBytes) {
+              case 1:
+                message.route = buffer.readInt8();
+                break;
+              case 2:
+                message.route = buffer.readInt16();
+                break;
+              case 4:
+                message.route = buffer.readInt32();
+                break;
+            }
+          }
+          if (buffer.remaining() > 0) {
+            message.buffer = buffer.readBytes(buffer.remaining());
+          }
+          return {
+            isHeartbeat: isHeartbeat,
+            message: message
+          };
         }
-        if (this.opts.routeBytesLen) {
-          if (this.opts.routeBytesLen > buffer.remaining()) {
-            return;
-          }
-          switch (this.opts.routeBytesLen) {
-            case 1:
-              message.route = buffer.readInt8();
-              break;
-            case 2:
-              message.route = buffer.readInt16();
-              break;
-            case 4:
-              message.route = buffer.readInt32();
-              break;
-          }
-          len -= this.opts.routeBytesLen;
-        }
-        if (len > 0) {
-          message.buffer = buffer.readBytes(len);
-        }
-        return message;
       }
     }]);
     return Packer;
@@ -6496,15 +6518,18 @@
       _defineProperty(this, "disconnectHandler", void 0);
       _defineProperty(this, "receiveHandler", void 0);
       _defineProperty(this, "errorHandler", void 0);
+      _defineProperty(this, "heartbeatHandler", void 0);
       _defineProperty(this, "opts", void 0);
       _defineProperty(this, "websocket", void 0);
       _defineProperty(this, "intervalId", void 0);
       _defineProperty(this, "packer", void 0);
+      _defineProperty(this, "buffer", void 0);
       _defineProperty(this, "waitgroup", void 0);
       this.opts = opts;
       this.websocket = undefined;
       this.packer = opts.packer || new Packer();
       this.waitgroup = new Map();
+      this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, false, ByteBuffer.DEFAULT_NOASSERT);
     }
     _createClass(Client, [{
       key: "connect",
@@ -6528,8 +6553,12 @@
             if (e.data.byteLength == 0) {
               return;
             }
-            var message = _this.packer.unpack(e.data);
-            message && (_this.invoke(message) || _this.receiveHandler && _this.receiveHandler(message));
+            var packet = _this.packer.unpack(e.data);
+            if (packet.isHeartbeat) {
+              _this.heartbeatHandler && _this.heartbeatHandler(packet.millisecond);
+            } else {
+              packet.message && (_this.invoke(packet.message) || _this.receiveHandler && _this.receiveHandler(packet.message));
+            }
           };
           return true;
         } catch (error) {
@@ -6562,7 +6591,7 @@
         if (!this.opts.heartbeat || this.opts.heartbeat <= 0) {
           return;
         }
-        var data = this.packer.empty();
+        var data = this.packer.packHeartbeat();
         this.intervalId = setInterval(function () {
           _this2.isConnected() && _this2.websocket && _this2.websocket.send(data);
         }, this.opts.heartbeat);
@@ -6588,6 +6617,11 @@
         this.errorHandler = handler;
       }
     }, {
+      key: "onHeartbeat",
+      value: function onHeartbeat(handler) {
+        this.heartbeatHandler = handler;
+      }
+    }, {
       key: "isConnected",
       value: function isConnected() {
         return this.websocket !== undefined && this.websocket.readyState == WebSocket.OPEN;
@@ -6601,7 +6635,7 @@
       key: "send",
       value: function send(message) {
         if (this.isConnected()) {
-          var data = this.packer.pack(message);
+          var data = this.packer.packMessage(message);
           this.websocket && this.websocket.send(data);
           return true;
         }

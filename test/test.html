@@ -22,12 +22,12 @@
     });
 
     const client = new Client({
-        url: 'ws://127.0.0.1:3553',
+        url: 'ws://192.168.8.8:3553',
         heartbeat: 10000,
         packer: new Packer({
-            byteOrder: 'little',
-            seqBytesLen: 2,
-            routeBytesLen: 2,
+            byteOrder: 'big',
+            seqBytesLen: 4,
+            routeBytesLen: 4,
         })
     });
 

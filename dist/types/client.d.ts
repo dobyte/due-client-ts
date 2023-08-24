@@ -16,15 +16,20 @@ export interface ReceiveHandler {
 export interface ErrorHandler {
     (): any;
 }
+export interface HeartbeatHandler {
+    (millisecond?: number): any;
+}
 export declare class Client {
     private connectHandler?;
     private disconnectHandler?;
     private receiveHandler?;
     private errorHandler?;
+    private heartbeatHandler?;
     private opts;
     private websocket?;
     private intervalId;
     private packer;
+    private buffer;
     private waitgroup;
     constructor(opts: ClientOptions);
     connect(): boolean;
@@ -34,6 +39,7 @@ export declare class Client {
     onDisconnect(handler: DisconnectHandler): void;
     onReceive(handler: ReceiveHandler): void;
     onError(handler: ErrorHandler): void;
+    onHeartbeat(handler: HeartbeatHandler): void;
     isConnected(): boolean;
     isConnecting(): boolean;
     send(message: Message): boolean;

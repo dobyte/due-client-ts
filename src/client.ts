@@ -1,3 +1,4 @@
+import ByteBuffer from 'bytebuffer';
 import { Packer, Message } from "./packer";
 // const WebSocket = require('ws');
 
@@ -26,6 +27,11 @@ export interface ErrorHandler {
     (): any
 }
 
+export interface HeartbeatHandler {
+    (millisecond?: number): any
+}
+
+
 export class Client {
     // 连接打开hook函数
     private connectHandler?: ConnectHandler;
@@ -35,6 +41,8 @@ export class Client {
     private receiveHandler?: ReceiveHandler;
     // 错误处理hook函数
     private errorHandler?: ErrorHandler;
+    // 心跳处理hook函数
+    private heartbeatHandler?: HeartbeatHandler;
     // 客户端配置
     private opts: ClientOptions;
     // websocket
@@ -43,18 +51,20 @@ export class Client {
     private intervalId: any;
     // 打包器
     private packer: Packer;
+    // 
+    private buffer: any;
     // 同步等待组
     private waitgroup: Map<number, {
         seq: number;
         callback: Map<number, (message: Message) => void>
     }>;
 
-
     public constructor(opts: ClientOptions) {
         this.opts = opts;
         this.websocket = undefined;
         this.packer = opts.packer || new Packer();
         this.waitgroup = new Map();
+        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, false, ByteBuffer.DEFAULT_NOASSERT);
     }
 
     /**
@@ -92,9 +102,13 @@ export class Client {
                     return;
                 }
 
-                const message = this.packer.unpack(e.data);
+                const packet = this.packer.unpack(e.data);
 
-                message && (this.invoke(message) || this.receiveHandler && this.receiveHandler(message));
+                if (packet.isHeartbeat) {
+                    this.heartbeatHandler && this.heartbeatHandler(packet.millisecond);
+                } else {
+                    packet.message && (this.invoke(packet.message) || this.receiveHandler && this.receiveHandler(packet.message));
+                }
             }
 
             return true
@@ -135,7 +149,7 @@ export class Client {
             return;
         }
 
-        const data = this.packer.empty();
+        const data = this.packer.packHeartbeat();
 
         this.intervalId = setInterval(() => {
             this.isConnected() && this.websocket && this.websocket.send(data);
@@ -175,6 +189,14 @@ export class Client {
     }
 
     /**
+     * 设置心跳处理器
+     * @param handler HeartbeatHandler
+     */
+    public onHeartbeat(handler: HeartbeatHandler) {
+        this.heartbeatHandler = handler
+    }
+
+    /**
      * 检测客户端是否已连接
      * @returns boolean
      */
@@ -197,7 +219,7 @@ export class Client {
      */
     public send(message: Message): boolean {
         if (this.isConnected()) {
-            const data = this.packer.pack(message);
+            const data = this.packer.packMessage(message);
 
             this.websocket && this.websocket.send(data);
 
