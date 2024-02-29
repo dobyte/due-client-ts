@@ -15,19 +15,16 @@
     import { Client, Packer } from '../dist/index.esm.js';
 
     const buffer = JSON.stringify({
-        Account: 'due',
-        Password: '123456',
-        Nickname: 'fuxiao',
-        Age: 31
+        message: 'hello server'
     });
 
     const client = new Client({
-        url: 'ws://192.168.8.8:3553',
+        url: 'ws://127.0.0.1:3533',
         heartbeat: 10000,
         packer: new Packer({
             byteOrder: 'big',
-            seqBytesLen: 4,
-            routeBytesLen: 4,
+            seqBytes: 0,
+            routeBytes: 4,
         })
     });
 
@@ -45,6 +42,11 @@
     // 监听连接断开
     client.onDisconnect(() => {
         console.log('disconnect');
+    });
+
+    // 监听接收到消息
+    client.onReceive((message) => {
+        console.log(message.buffer.toUTF8())
     });
 
     client.connect();

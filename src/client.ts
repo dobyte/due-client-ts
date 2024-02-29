@@ -1,5 +1,6 @@
 import ByteBuffer from 'bytebuffer';
-import { Packer, Message } from "./packer";
+import { Packer } from "./packer";
+import { Message } from "./message";
 // const WebSocket = require('ws');
 
 export interface ClientOptions {
@@ -62,7 +63,7 @@ export class Client {
     public constructor(opts: ClientOptions) {
         this.opts = opts;
         this.websocket = undefined;
-        this.packer = opts.packer || new Packer();
+        this.packer = opts.packer || new Packer(opts.packer);
         this.waitgroup = new Map();
         this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, false, ByteBuffer.DEFAULT_NOASSERT);
     }
@@ -230,7 +231,7 @@ export class Client {
     }
 
     /**
-     * 请求C/S模型
+     * 请求C/S模型，需要客户端和服务器同时开启seq配置支持
      * @param route 路由
      * @param buffer 数据
      * @param timeout 超时时间

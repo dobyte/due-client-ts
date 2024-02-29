@@ -6388,45 +6388,45 @@
   }();
   var ByteBuffer = /*@__PURE__*/getDefaultExportFromCjs(bytebufferNode);
 
+  var BIG_ENDIAN = 'big';
+  var DEFAULT_BYTE_ORDER = BIG_ENDIAN;
+  var DEFAULT_SIZE_BYTES = 4;
+  var DEFAULT_HEADER_BYTES = 1;
+  var DEFAULT_ROUTE_BYTES = 2;
+  var DEFAULT_SEQ_BYTES = 2;
   var Packer = /*#__PURE__*/function () {
     function Packer(opts) {
       _classCallCheck(this, Packer);
       _defineProperty(this, "opts", void 0);
       _defineProperty(this, "buffer", void 0);
       this.opts = opts || {
-        byteOrder: 'big',
-        seqBytes: 2,
-        routeBytes: 2
+        byteOrder: DEFAULT_BYTE_ORDER,
+        routeBytes: DEFAULT_ROUTE_BYTES,
+        seqBytes: DEFAULT_SEQ_BYTES
       };
-      this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != 'big', ByteBuffer.DEFAULT_NOASSERT);
+      this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
+      this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
+      this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+      this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != BIG_ENDIAN, ByteBuffer.DEFAULT_NOASSERT);
     }
     _createClass(Packer, [{
       key: "packHeartbeat",
       value: function packHeartbeat() {
         var buffer = this.buffer.clone();
-        var opcode = 1 << 7;
-        buffer.writeInt8(opcode);
+        var header = 1 << 7;
+        buffer.writeInt32(DEFAULT_HEADER_BYTES);
+        buffer.writeInt8(header);
         return buffer.flip().toArrayBuffer();
       }
     }, {
       key: "packMessage",
       value: function packMessage(message) {
         var buffer = this.buffer.clone();
-        var opcode = 0;
+        var header = 0;
         var seq = message.seq || 0;
         var route = message.route || 0;
-        buffer.writeInt8(opcode);
-        switch (this.opts.seqBytes) {
-          case 1:
-            buffer.writeInt8(seq);
-            break;
-          case 2:
-            buffer.writeInt16(seq);
-            break;
-          case 4:
-            buffer.writeInt32(seq);
-            break;
-        }
+        buffer.skip(DEFAULT_SIZE_BYTES);
+        buffer.writeInt8(header);
         switch (this.opts.routeBytes) {
           case 1:
             buffer.writeInt8(route);
@@ -6438,15 +6438,27 @@
             buffer.writeInt32(route);
             break;
         }
+        switch (this.opts.seqBytes) {
+          case 1:
+            buffer.writeInt8(seq);
+            break;
+          case 2:
+            buffer.writeInt16(seq);
+            break;
+          case 4:
+            buffer.writeInt32(seq);
+            break;
+        }
         message.buffer && buffer.append(message.buffer);
+        buffer.writeInt32(buffer.offset - DEFAULT_SIZE_BYTES, 0);
         return buffer.flip().toArrayBuffer();
       }
     }, {
       key: "unpack",
       value: function unpack(data) {
-        var buffer = this.buffer.clone().append(data, 'binary').flip();
-        var opcode = buffer.readUint8();
-        var isHeartbeat = opcode >> 7 == 1;
+        var buffer = this.buffer.clone().append(data, 'binary').flip().skip(DEFAULT_SIZE_BYTES);
+        var header = buffer.readUint8();
+        var isHeartbeat = header >> 7 == 1;
         if (isHeartbeat) {
           var millisecond;
           if (buffer.remaining() > 0) {
@@ -6527,7 +6539,7 @@
       _defineProperty(this, "waitgroup", void 0);
       this.opts = opts;
       this.websocket = undefined;
-      this.packer = opts.packer || new Packer();
+      this.packer = opts.packer || new Packer(opts.packer);
       this.waitgroup = new Map();
       this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, false, ByteBuffer.DEFAULT_NOASSERT);
     }

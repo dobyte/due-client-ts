@@ -9,12 +9,6 @@ export interface PackerOptions {
     routeBytes?: number;
 }
 
-export interface Message {
-    seq?: number;
-    route: number;
-    buffer: any;
-}
-
 export interface Packet {
     // 是否是心跳包
     isHeartbeat: boolean;
@@ -24,13 +18,46 @@ export interface Packet {
     message?: Message;
 }
 
+export interface Message {
+    seq?: number;
+    route: number;
+    buffer: any;
+}
+
+// 大端序
+const BIG_ENDIAN = 'big';
+
+// 小端序
+const LITTLE_ENDIAN = 'little';
+
+// 默认字节序
+const DEFAULT_BYTE_ORDER = BIG_ENDIAN;
+
+// 默认size位字节长度
+const DEFAULT_SIZE_BYTES = 4;
+
+// 默认header位字节长度
+const DEFAULT_HEADER_BYTES = 1;
+
+// 默认route位字节长度
+const DEFAULT_ROUTE_BYTES = 2;
+
+// 默认seq位字节长度
+const DEFAULT_SEQ_BYTES = 2;
+
+// 默认buffer数据位字节长度
+const DEFAULT_BUFFER_BYTES = 5000;
+
 export class Packer {
     private opts: PackerOptions;
     private buffer: any;
 
     public constructor(opts?: PackerOptions) {
-        this.opts = opts || { byteOrder: 'big', seqBytes: 2, routeBytes: 2 };
-        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != 'big', ByteBuffer.DEFAULT_NOASSERT);
+        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES };
+        this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
+        this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
+        this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != BIG_ENDIAN, ByteBuffer.DEFAULT_NOASSERT);
     }
 
     /**
@@ -39,9 +66,11 @@ export class Packer {
      */
     public packHeartbeat(): ArrayBuffer {
         let buffer = this.buffer.clone();
-        let opcode = 1 << 7;
+        let header = 1 << 7;
 
-        buffer.writeInt8(opcode);
+        buffer.writeInt32(DEFAULT_HEADER_BYTES);
+
+        buffer.writeInt8(header);
 
         return buffer.flip().toArrayBuffer();
     }
@@ -53,23 +82,13 @@ export class Packer {
      */
     public packMessage(message: Message): ArrayBuffer {
         let buffer = this.buffer.clone();
-        let opcode = 0;
+        let header = 0;
         let seq = message.seq || 0;
         let route = message.route || 0;
 
-        buffer.writeInt8(opcode);
+        buffer.skip(DEFAULT_SIZE_BYTES);
 
-        switch (this.opts.seqBytes) {
-            case 1:
-                buffer.writeInt8(seq);
-                break;
-            case 2:
-                buffer.writeInt16(seq);
-                break;
-            case 4:
-                buffer.writeInt32(seq);
-                break;
-        }
+        buffer.writeInt8(header);
 
         switch (this.opts.routeBytes) {
             case 1:
@@ -83,7 +102,21 @@ export class Packer {
                 break;
         }
 
+        switch (this.opts.seqBytes) {
+            case 1:
+                buffer.writeInt8(seq);
+                break;
+            case 2:
+                buffer.writeInt16(seq);
+                break;
+            case 4:
+                buffer.writeInt32(seq);
+                break;
+        }
+
         message.buffer && buffer.append(message.buffer);
+
+        buffer.writeInt32(buffer.offset - DEFAULT_SIZE_BYTES, 0);
 
         return buffer.flip().toArrayBuffer();
     }
@@ -94,9 +127,9 @@ export class Packer {
      * @returns Message
      */
     public unpack(data: any): Packet {
-        const buffer = this.buffer.clone().append(data, 'binary').flip();
-        const opcode = buffer.readUint8();
-        const isHeartbeat = opcode >> 7 == 1;
+        const buffer = this.buffer.clone().append(data, 'binary').flip().skip(DEFAULT_SIZE_BYTES);
+        const header = buffer.readUint8();
+        const isHeartbeat = header >> 7 == 1;
 
         if (isHeartbeat) {
             let millisecond

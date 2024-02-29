@@ -19,10 +19,10 @@ const { Client } = require('../dist/index.js')
 // console.log(buf)
 
 const client = new Client({
-    url: 'ws://127.0.0.1:3553',
-    byteOrder: 'little',
-    seqBytesLen: 2,
-    routeBytesLen: 2,
+    url: 'ws://127.0.0.1:3533',
+    byteOrder: 'big',
+    seqBytesLen: 0,
+    routeBytesLen: 4,
 });
 
 // 监听连接
