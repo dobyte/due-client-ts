@@ -6386,6 +6386,25 @@ var bytebufferNode = function () {
 }();
 var ByteBuffer = /*@__PURE__*/getDefaultExportFromCjs(bytebufferNode);
 
+var Json = /*#__PURE__*/function () {
+  function Json() {
+    _classCallCheck(this, Json);
+  }
+  _createClass(Json, [{
+    key: "encode",
+    value: function encode(data) {
+      return JSON.stringify(data);
+    }
+  }, {
+    key: "decode",
+    value: function decode(buff) {
+      console.log(buff);
+      return JSON.parse(buff.toUTF8());
+    }
+  }]);
+  return Json;
+}();
+
 var BIG_ENDIAN = 'big';
 var DEFAULT_BYTE_ORDER = BIG_ENDIAN;
 var DEFAULT_SIZE_BYTES = 4;
@@ -6400,11 +6419,13 @@ var Packer = /*#__PURE__*/function () {
     this.opts = opts || {
       byteOrder: DEFAULT_BYTE_ORDER,
       routeBytes: DEFAULT_ROUTE_BYTES,
-      seqBytes: DEFAULT_SEQ_BYTES
+      seqBytes: DEFAULT_SEQ_BYTES,
+      encoding: new Json()
     };
     this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
     this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
     this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+    this.opts.encoding = this.opts.encoding !== undefined ? this.opts.encoding : new Json();
     this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != BIG_ENDIAN, ByteBuffer.DEFAULT_NOASSERT);
   }
   _createClass(Packer, [{
@@ -6419,6 +6440,7 @@ var Packer = /*#__PURE__*/function () {
   }, {
     key: "packMessage",
     value: function packMessage(message) {
+      var _this$opts$encoding;
       var buffer = this.buffer.clone();
       var header = 0;
       var seq = message.seq || 0;
@@ -6447,7 +6469,7 @@ var Packer = /*#__PURE__*/function () {
           buffer.writeInt32(seq);
           break;
       }
-      message.buffer && buffer.append(message.buffer);
+      message.data && buffer.append((_this$opts$encoding = this.opts.encoding) === null || _this$opts$encoding === void 0 ? void 0 : _this$opts$encoding.encode(message.data));
       buffer.writeInt32(buffer.offset - DEFAULT_SIZE_BYTES, 0);
       return buffer.flip().toArrayBuffer();
     }
@@ -6460,7 +6482,7 @@ var Packer = /*#__PURE__*/function () {
       if (isHeartbeat) {
         var millisecond;
         if (buffer.remaining() > 0) {
-          millisecond = buffer.readUint64().toNumber();
+          millisecond = buffer.readInt64().toString();
         }
         return {
           isHeartbeat: isHeartbeat,
@@ -6470,7 +6492,7 @@ var Packer = /*#__PURE__*/function () {
         var message = {
           seq: 0,
           route: 0,
-          buffer: undefined
+          data: undefined
         };
         if (this.opts.seqBytes) {
           if (this.opts.seqBytes > buffer.remaining()) {
@@ -6509,7 +6531,8 @@ var Packer = /*#__PURE__*/function () {
           }
         }
         if (buffer.remaining() > 0) {
-          message.buffer = buffer.readBytes(buffer.remaining());
+          var _this$opts$encoding2;
+          message.data = (_this$opts$encoding2 = this.opts.encoding) === null || _this$opts$encoding2 === void 0 ? void 0 : _this$opts$encoding2.decode(buffer.readBytes(buffer.remaining()));
         }
         return {
           isHeartbeat: isHeartbeat,
@@ -6653,7 +6676,7 @@ var Client = /*#__PURE__*/function () {
     }
   }, {
     key: "request",
-    value: function request(route, buffer, timeout) {
+    value: function request(route, data, timeout) {
       var _this3 = this;
       return new Promise(function (resolve, reject) {
         if (_this3.isConnected()) {
@@ -6679,7 +6702,7 @@ var Client = /*#__PURE__*/function () {
           _this3.send({
             seq: seq,
             route: route,
-            buffer: buffer
+            data: data
           });
         } else {
           reject();

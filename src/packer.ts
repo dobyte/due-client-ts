@@ -1,4 +1,6 @@
 import ByteBuffer from 'bytebuffer';
+import { Encoding } from "./encoding/encoding";
+import { Json } from "./encoding/json";
 
 export interface PackerOptions {
     // 字节序；默认为big
@@ -7,6 +9,17 @@ export interface PackerOptions {
     seqBytes?: number;
     // 路由字节长度（字节）；默认为2字节，最大值为65535
     routeBytes?: number;
+    // 编辑解码器
+    encoding?: Encoding;
+}
+
+export interface Message {
+    // 消息序列号
+    seq?: number;
+    // 消息路由
+    route: number;
+    // 消息数据
+    data?: any;
 }
 
 export interface Packet {
@@ -16,12 +29,6 @@ export interface Packet {
     millisecond?: number;
     // 消息数据
     message?: Message;
-}
-
-export interface Message {
-    seq?: number;
-    route: number;
-    buffer: any;
 }
 
 // 大端序
@@ -53,10 +60,11 @@ export class Packer {
     private buffer: any;
 
     public constructor(opts?: PackerOptions) {
-        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES };
+        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES, encoding: new Json() };
         this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
         this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
         this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+        this.opts.encoding = this.opts.encoding !== undefined ? this.opts.encoding : new Json();
         this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != BIG_ENDIAN, ByteBuffer.DEFAULT_NOASSERT);
     }
 
@@ -114,7 +122,7 @@ export class Packer {
                 break;
         }
 
-        message.buffer && buffer.append(message.buffer);
+        message.data && buffer.append(this.opts.encoding?.encode(message.data));
 
         buffer.writeInt32(buffer.offset - DEFAULT_SIZE_BYTES, 0);
 
@@ -135,12 +143,12 @@ export class Packer {
             let millisecond
 
             if (buffer.remaining() > 0) {
-                millisecond = buffer.readUint64().toNumber();
+                millisecond = Number(buffer.readInt64().toString());
             }
 
             return { isHeartbeat, millisecond };
         } else {
-            const message = { seq: 0, route: 0, buffer: undefined }
+            const message = { seq: 0, route: 0, data: undefined }
 
             if (this.opts.seqBytes) {
                 if (this.opts.seqBytes > buffer.remaining()) {
@@ -179,7 +187,7 @@ export class Packer {
             }
 
             if (buffer.remaining() > 0) {
-                message.buffer = buffer.readBytes(buffer.remaining());
+                message.data = this.opts.encoding?.decode(buffer.readBytes(buffer.remaining()));
             }
 
             return { isHeartbeat, message };

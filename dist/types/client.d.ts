@@ -43,6 +43,6 @@ export declare class Client {
     isConnected(): boolean;
     isConnecting(): boolean;
     send(message: Message): boolean;
-    request(route: number, buffer: any, timeout?: number): Promise<Message>;
+    request(route: number, data: any, timeout?: number): Promise<Message>;
     private invoke;
 }

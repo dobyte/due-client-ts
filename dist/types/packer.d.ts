@@ -1,12 +1,14 @@
+import { Encoding } from "./encoding/encoding";
 export interface PackerOptions {
     byteOrder?: string;
     seqBytes?: number;
     routeBytes?: number;
+    encoding?: Encoding;
 }
 export interface Message {
     seq?: number;
     route: number;
-    buffer: any;
+    data?: any;
 }
 export interface Packet {
     isHeartbeat: boolean;

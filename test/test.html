@@ -14,9 +14,9 @@
 <script type="module">
     import { Client, Packer } from '../dist/index.esm.js';
 
-    const buffer = JSON.stringify({
+    const data = {
         message: 'hello server'
-    });
+    };
 
     const client = new Client({
         url: 'ws://127.0.0.1:3533',
@@ -32,7 +32,8 @@
     client.onConnect(async () => {
         console.log('connect');
 
-        client.request(1, buffer, 2000).then((message) => {
+        // 同步请求，需要客户端和服务器同时开启seq配置
+        client.request(1, data, 2000).then((message) => {
             console.log('resolve', message);
         }).catch(() => {
             console.log('reject');
@@ -46,7 +47,12 @@
 
     // 监听接收到消息
     client.onReceive((message) => {
-        console.log(message.buffer.toUTF8())
+        console.log(message.data)
+    });
+
+    // 监听接受服务器的心跳附带的服务器时间
+    client.onHeartbeat((millisecond) => {
+        console.log(millisecond)
     });
 
     client.connect();

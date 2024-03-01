@@ -1,6 +1,5 @@
 import ByteBuffer from 'bytebuffer';
-import { Packer } from "./packer";
-import { Message } from "./message";
+import { Packer, Message } from "./packer";
 // const WebSocket = require('ws');
 
 export interface ClientOptions {
@@ -31,7 +30,6 @@ export interface ErrorHandler {
 export interface HeartbeatHandler {
     (millisecond?: number): any
 }
-
 
 export class Client {
     // 连接打开hook函数
@@ -233,11 +231,11 @@ export class Client {
     /**
      * 请求C/S模型，需要客户端和服务器同时开启seq配置支持
      * @param route 路由
-     * @param buffer 数据
+     * @param data 数据
      * @param timeout 超时时间
      * @returns 
      */
-    public request(route: number, buffer: any, timeout?: number): Promise<Message> {
+    public request(route: number, data: any, timeout?: number): Promise<Message> {
         return new Promise((resolve, reject) => {
             if (this.isConnected()) {
                 let group = this.waitgroup.get(route);
@@ -262,7 +260,7 @@ export class Client {
                     resolve(message);
                 });
 
-                this.send({ seq, route, buffer });
+                this.send({ seq, route, data });
             } else {
                 reject();
             }
