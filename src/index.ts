@@ -1,2 +1,2 @@
 export { Client, ClientOptions } from './client';
-export { Packer, PackerOptions, Message } from './packer';
+export { Packer, PackerOptions } from './packer';

@@ -1,7 +1,3 @@
-import ByteBuffer from 'bytebuffer';
-import { Encoding } from "./encoding/encoding";
-import { Json } from "./encoding/json";
-
 export interface PackerOptions {
     // 字节序；默认为big
     byteOrder?: string;
@@ -9,8 +5,6 @@ export interface PackerOptions {
     seqBytes?: number;
     // 路由字节长度（字节）；默认为2字节，最大值为65535
     routeBytes?: number;
-    // 编辑解码器
-    encoding?: Encoding;
 }
 
 export interface Message {
@@ -19,7 +13,7 @@ export interface Message {
     // 消息路由
     route: number;
     // 消息数据
-    data?: any;
+    buffer?: Uint8Array;
 }
 
 export interface Packet {
@@ -52,20 +46,22 @@ const DEFAULT_ROUTE_BYTES = 2;
 // 默认seq位字节长度
 const DEFAULT_SEQ_BYTES = 2;
 
+// 默认服务器时间戳字节长度
+const DEFAULT_TIMESTAMP_BYTES = 8;
+
 // 默认buffer数据位字节长度
 const DEFAULT_BUFFER_BYTES = 5000;
 
 export class Packer {
     private opts: PackerOptions;
-    private buffer: any;
+    private heartbeat: ArrayBuffer;
 
     public constructor(opts?: PackerOptions) {
-        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES, encoding: new Json() };
+        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES };
         this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
         this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
         this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
-        this.opts.encoding = this.opts.encoding !== undefined ? this.opts.encoding : new Json();
-        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, this.opts.byteOrder != BIG_ENDIAN, ByteBuffer.DEFAULT_NOASSERT);
+        this.heartbeat = this.doPackHeartbeat();
     }
 
     /**
@@ -73,14 +69,25 @@ export class Packer {
      * @returns ArrayBuffer
      */
     public packHeartbeat(): ArrayBuffer {
-        let buffer = this.buffer.clone();
-        let header = 1 << 7;
+        return this.heartbeat;
+    }
 
-        buffer.writeInt32(DEFAULT_HEADER_BYTES);
+    /**
+     * 执行打包心跳操作
+     * @returns ArrayBuffer
+     */
+    private doPackHeartbeat(): ArrayBuffer {
+        let offset = 0;
+        let arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + DEFAULT_HEADER_BYTES);
+        let dataView = new DataView(arrayBuffer);
 
-        buffer.writeInt8(header);
+        dataView.setUint32(offset, DEFAULT_HEADER_BYTES);
+        offset += DEFAULT_SIZE_BYTES;
 
-        return buffer.flip().toArrayBuffer();
+        dataView.setUint8(offset, 1 << 7);
+        offset += DEFAULT_HEADER_BYTES;
+
+        return arrayBuffer;
     }
 
     /**
@@ -89,44 +96,53 @@ export class Packer {
      * @returns ArrayBuffer
      */
     public packMessage(message: Message): ArrayBuffer {
-        let buffer = this.buffer.clone();
-        let header = 0;
         let seq = message.seq || 0;
         let route = message.route || 0;
+        let offset = 0;
+        let size = DEFAULT_HEADER_BYTES + (this.opts.routeBytes || 0) + (this.opts.seqBytes || 0) + (message.buffer ? message.buffer.length : 0);
+        let arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + size);
+        let dataView = new DataView(arrayBuffer);
 
-        buffer.skip(DEFAULT_SIZE_BYTES);
+        dataView.setUint32(offset, size);
+        offset += DEFAULT_SIZE_BYTES;
 
-        buffer.writeInt8(header);
+        dataView.setUint8(offset, 0);
+        offset += DEFAULT_HEADER_BYTES;
 
         switch (this.opts.routeBytes) {
             case 1:
-                buffer.writeInt8(route);
+                dataView.setInt8(offset, route);
                 break;
             case 2:
-                buffer.writeInt16(route);
+                dataView.setInt16(offset, route);
                 break;
             case 4:
-                buffer.writeInt32(route);
+                dataView.setInt32(offset, route);
                 break;
         }
+        offset += this.opts.routeBytes || 0;
 
         switch (this.opts.seqBytes) {
             case 1:
-                buffer.writeInt8(seq);
+                dataView.setInt8(offset, seq);
                 break;
             case 2:
-                buffer.writeInt16(seq);
+                dataView.setInt16(offset, seq);
                 break;
             case 4:
-                buffer.writeInt32(seq);
+                dataView.setInt32(offset, seq);
                 break;
         }
+        offset += this.opts.seqBytes || 0;
 
-        message.data && buffer.append(this.opts.encoding?.encode(message.data));
+        if (message.buffer) {
+            for (let i = 0; i < message.buffer.length; i++) {
+                dataView.setUint8(offset, message.buffer[i]);
+                offset += 1;
+            }
+        }
 
-        buffer.writeInt32(buffer.offset - DEFAULT_SIZE_BYTES, 0);
-
-        return buffer.flip().toArrayBuffer();
+        return arrayBuffer;
     }
 
     /**
@@ -135,59 +151,59 @@ export class Packer {
      * @returns Message
      */
     public unpack(data: any): Packet {
-        const buffer = this.buffer.clone().append(data, 'binary').flip().skip(DEFAULT_SIZE_BYTES);
-        const header = buffer.readUint8();
-        const isHeartbeat = header >> 7 == 1;
+        let offset = 0;
+        let dataView = new DataView(data);
+
+        let size = dataView.getUint32(offset);
+        offset += DEFAULT_SIZE_BYTES;
+
+        let header = dataView.getUint8(offset);
+        offset += DEFAULT_HEADER_BYTES;
+
+        let isHeartbeat = header >> 7 == 1;
 
         if (isHeartbeat) {
-            let millisecond
+            if (size + DEFAULT_SIZE_BYTES > offset) {
+                let millisecond = Number(dataView.getBigUint64(offset).toString());
+                offset += DEFAULT_TIMESTAMP_BYTES;
 
-            if (buffer.remaining() > 0) {
-                millisecond = Number(buffer.readInt64().toString());
+                return { isHeartbeat, millisecond };
+            } else {
+                return { isHeartbeat };
             }
-
-            return { isHeartbeat, millisecond };
         } else {
-            const message = { seq: 0, route: 0, data: undefined }
-
-            if (this.opts.seqBytes) {
-                if (this.opts.seqBytes > buffer.remaining()) {
-                    return { isHeartbeat };
-                }
-
-                switch (this.opts.seqBytes) {
-                    case 1:
-                        message.seq = buffer.readInt8();
-                        break;
-                    case 2:
-                        message.seq = buffer.readInt16();
-                        break;
-                    case 4:
-                        message.seq = buffer.readInt32();
-                        break;
-                }
-            }
+            let message: Message = { seq: 0, route: 0 };
 
             if (this.opts.routeBytes) {
-                if (this.opts.routeBytes > buffer.remaining()) {
-                    return { isHeartbeat };
-                }
-
                 switch (this.opts.routeBytes) {
                     case 1:
-                        message.route = buffer.readInt8();
+                        message.route = dataView.getInt8(offset);
                         break;
                     case 2:
-                        message.route = buffer.readInt16();
+                        message.route = dataView.getInt16(offset);
                         break;
                     case 4:
-                        message.route = buffer.readInt32();
+                        message.route = dataView.getInt32(offset);
                         break;
                 }
             }
+            offset += this.opts.routeBytes || 0;
 
-            if (buffer.remaining() > 0) {
-                message.data = this.opts.encoding?.decode(buffer.readBytes(buffer.remaining()));
+            switch (this.opts.seqBytes) {
+                case 1:
+                    message.seq = dataView.getInt8(offset);
+                    break;
+                case 2:
+                    message.seq = dataView.getInt16(offset);
+                    break;
+                case 4:
+                    message.seq = dataView.getInt32(offset);
+                    break;
+            }
+            offset += this.opts.seqBytes || 0;
+
+            if (size + DEFAULT_SIZE_BYTES > offset) {
+                message.buffer = new Uint8Array(data, offset);
             }
 
             return { isHeartbeat, message };

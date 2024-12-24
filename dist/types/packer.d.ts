@@ -1,14 +1,12 @@
-import { Encoding } from "./encoding/encoding";
 export interface PackerOptions {
     byteOrder?: string;
     seqBytes?: number;
     routeBytes?: number;
-    encoding?: Encoding;
 }
 export interface Message {
     seq?: number;
     route: number;
-    data?: any;
+    buffer?: Uint8Array;
 }
 export interface Packet {
     isHeartbeat: boolean;
@@ -17,9 +15,10 @@ export interface Packet {
 }
 export declare class Packer {
     private opts;
-    private buffer;
+    private heartbeat;
     constructor(opts?: PackerOptions);
     packHeartbeat(): ArrayBuffer;
+    private doPackHeartbeat;
     packMessage(message: Message): ArrayBuffer;
     unpack(data: any): Packet;
 }

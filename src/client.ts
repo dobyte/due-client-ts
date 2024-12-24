@@ -1,6 +1,4 @@
-import ByteBuffer from 'bytebuffer';
 import { Packer, Message } from "./packer";
-// const WebSocket = require('ws');
 
 export interface ClientOptions {
     // 连接地址
@@ -63,7 +61,6 @@ export class Client {
         this.websocket = undefined;
         this.packer = opts.packer || new Packer(opts.packer);
         this.waitgroup = new Map();
-        this.buffer = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, false, ByteBuffer.DEFAULT_NOASSERT);
     }
 
     /**
@@ -235,7 +232,7 @@ export class Client {
      * @param timeout 超时时间
      * @returns 
      */
-    public request(route: number, data: any, timeout?: number): Promise<Message> {
+    public request(route: number, buffer?: Uint8Array, timeout?: number): Promise<Message> {
         return new Promise((resolve, reject) => {
             if (this.isConnected()) {
                 let group = this.waitgroup.get(route);
@@ -260,7 +257,7 @@ export class Client {
                     resolve(message);
                 });
 
-                this.send({ seq, route, data });
+                this.send({ seq, route, buffer });
             } else {
                 reject();
             }
@@ -273,7 +270,7 @@ export class Client {
      * @returns 回调结果
      */
     private invoke(message: Message): boolean {
-        if (message.seq == 0) {
+        if (message.seq === undefined || message.seq === 0) {
             return false
         }
 

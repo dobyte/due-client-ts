@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>due client ts example</title>
 </head>
 
 <body>
@@ -14,12 +14,14 @@
 <script type="module">
     import { Client, Packer } from '../dist/index.esm.js';
 
-    const data = {
+    // 请求数据包
+    const buffer = (new TextEncoder).encode(JSON.stringify({
         message: 'hello server'
-    };
+    }));
 
+    // 创建客户端
     const client = new Client({
-        url: 'ws://127.0.0.1:3533',
+        url: 'ws://127.0.0.1:3553',
         heartbeat: 10000,
         packer: new Packer({
             byteOrder: 'big',
@@ -29,15 +31,23 @@
     });
 
     // 监听连接
-    client.onConnect(async () => {
+    client.onConnect(() => {
         console.log('connect');
 
-        // 同步请求，需要客户端和服务器同时开启seq配置
-        client.request(1, data, 2000).then((message) => {
-            console.log('resolve', message);
-        }).catch(() => {
-            console.log('reject');
-        });
+        // 发送同步请求，需要客户端和服务器同时开启seq配置
+        // client.request(1, buffer, 2000).then((message) => {
+        //     console.log('resolve', message);
+        // }).catch(() => {
+        //     console.log('reject');
+        // });
+
+        // 发送异步消息
+        setInterval(() => {
+            client.send({
+                route: 1,
+                buffer: buffer
+            });
+        }, 1000);
     });
 
     // 监听连接断开
@@ -47,17 +57,16 @@
 
     // 监听接收到消息
     client.onReceive((message) => {
-        console.log(message.data)
+        console.log(JSON.parse((new TextDecoder).decode(message.buffer)));
     });
 
     // 监听接受服务器的心跳附带的服务器时间
     client.onHeartbeat((millisecond) => {
-        console.log(millisecond)
+        millisecond && console.log(millisecond);
     });
 
+    // 建立连接
     client.connect();
-
-    console.log(client);
 </script>
 
 </html>
