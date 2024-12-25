@@ -89,9 +89,9 @@ const request = (c) => {
         // 发送消息
         try {
             c.request(1, buffer, 2000).then((message) => {
-                document.write('response message: ', (new TextDecoder).decode(message.buffer), '<br/>');
+                console.log('response message: ', (new TextDecoder).decode(message.buffer));
             }).catch(() => {
-                document.write('reject', '<br/>');
+                console.log('reject');
             });
 
             counter++;
@@ -129,7 +129,7 @@ const send = (c) => {
 
 // 监听连接
 client.onConnect((c) => {
-    document.write('connect success', '<br/>');
+    console.log('connect success');
 
     // 发送同步请求，需要客户端和服务器同时开启seq配置
     request(c);
@@ -140,7 +140,7 @@ client.onConnect((c) => {
 
 // 监听连接断开
 client.onDisconnect((c) => {
-    document.write('disconnect success', '<br/>');
+    console.log('disconnect success');
 
     // 重新连接
     c.connect();
@@ -148,12 +148,12 @@ client.onDisconnect((c) => {
 
 // 监听接收到消息
 client.onReceive((c, message) => {
-    document.write('receive message: ', (new TextDecoder).decode(message.buffer), '<br/>');
+    console.log('receive message: ', (new TextDecoder).decode(message.buffer));
 });
 
 // 监听接受服务器的心跳附带的服务器时间
 client.onHeartbeat((c, millisecond) => {
-    millisecond && document.write("server heartbeat timestamp: ", millisecond, '<br/>');
+    millisecond && console.log("server heartbeat timestamp: ", millisecond);
 });
 
 // 建立连接
