@@ -1,6 +1,6 @@
 {
   "name": "due-client",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "a client written in typescript of the due game framework",
   "main": "./dist/index.js",
   "module": "./dist/index.esm.js",
@@ -14,7 +14,26 @@
     "pretest": "npm run build"
   },
   "author": "fuxiao",
-  "license": "ISC",
+  "license": "MIT",
+  "homepage": "https://github.com/dobyte/due-client-ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dobyte/due-client-ts.git"
+  },
+  "keywords": [
+    "due",
+    "due-client",
+    "due-client-js",
+    "due-client-ts",
+    "game",
+    "game-engine",
+    "game-server",
+    "game-server-framework"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
     "@babel/plugin-transform-runtime": "^7.21.4",
     "@babel/preset-env": "^7.21.4",
