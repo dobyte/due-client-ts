@@ -29,9 +29,5 @@
   },
   "files": [
     "dist"
-  ],
-  "dependencies": {
-    "bytebuffer": "^5.0.1",
-    "requirejs": "^2.3.6"
-  }
+  ]
 }
