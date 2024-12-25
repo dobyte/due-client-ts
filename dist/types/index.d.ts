@@ -1,2 +1,2 @@
-export { Client, ClientOptions } from './client';
-export { Packer, PackerOptions } from './packer';
+export { Client, ClientOptions, ConnectHandler, DisconnectHandler, ReceiveHandler, ErrorHandler, HeartbeatHandler } from './client';
+export { Packer, PackerOptions, Packet, Message } from './packer';

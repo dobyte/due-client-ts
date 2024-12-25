@@ -5,19 +5,19 @@ export interface ClientOptions {
     heartbeat: number;
 }
 export interface ConnectHandler {
-    (): any;
+    (client: Client): any;
 }
 export interface DisconnectHandler {
-    (): any;
+    (client: Client): any;
 }
 export interface ReceiveHandler {
-    (message: Message): any;
+    (client: Client, message: Message): any;
 }
 export interface ErrorHandler {
-    (): any;
+    (client: Client): any;
 }
 export interface HeartbeatHandler {
-    (millisecond?: number): any;
+    (client: Client, millisecond?: number): any;
 }
 export declare class Client {
     private connectHandler?;

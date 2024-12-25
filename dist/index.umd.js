@@ -70,25 +70,26 @@
   }
 
   var BIG_ENDIAN = 'big';
+  var LITTLE_ENDIAN = 'little';
   var DEFAULT_BYTE_ORDER = BIG_ENDIAN;
   var DEFAULT_SIZE_BYTES = 4;
   var DEFAULT_HEADER_BYTES = 1;
   var DEFAULT_ROUTE_BYTES = 2;
   var DEFAULT_SEQ_BYTES = 2;
   var DEFAULT_TIMESTAMP_BYTES = 8;
+  var DEFAULT_BUFFER_BYTES = 5000;
   var Packer = /*#__PURE__*/function () {
     function Packer(opts) {
       _classCallCheck(this, Packer);
-      _defineProperty(this, "opts", void 0);
+      _defineProperty(this, "byteOrder", void 0);
+      _defineProperty(this, "seqBytes", void 0);
+      _defineProperty(this, "routeBytes", void 0);
+      _defineProperty(this, "bufferBytes", void 0);
       _defineProperty(this, "heartbeat", void 0);
-      this.opts = opts || {
-        byteOrder: DEFAULT_BYTE_ORDER,
-        routeBytes: DEFAULT_ROUTE_BYTES,
-        seqBytes: DEFAULT_SEQ_BYTES
-      };
-      this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
-      this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
-      this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+      this.byteOrder = opts ? opts.byteOrder ? opts.byteOrder : DEFAULT_BYTE_ORDER : DEFAULT_BYTE_ORDER;
+      this.routeBytes = opts ? opts.routeBytes ? opts.routeBytes : DEFAULT_ROUTE_BYTES : DEFAULT_ROUTE_BYTES;
+      this.seqBytes = opts ? opts.seqBytes !== undefined ? opts.seqBytes : DEFAULT_SEQ_BYTES : DEFAULT_SEQ_BYTES;
+      this.bufferBytes = opts ? opts.bufferBytes !== undefined ? opts.bufferBytes : DEFAULT_BUFFER_BYTES : DEFAULT_BUFFER_BYTES;
       this.heartbeat = this.doPackHeartbeat();
     }
     _createClass(Packer, [{
@@ -112,39 +113,49 @@
       key: "packMessage",
       value: function packMessage(message) {
         var seq = message.seq || 0;
-        var route = message.route || 0;
+        var route = message.route;
         var offset = 0;
-        var size = DEFAULT_HEADER_BYTES + (this.opts.routeBytes || 0) + (this.opts.seqBytes || 0) + (message.buffer ? message.buffer.length : 0);
+        var size = DEFAULT_HEADER_BYTES + this.routeBytes + this.seqBytes + (message.buffer ? message.buffer.length : 0);
+        var isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
+        if (route > Math.pow(2, 8 * this.routeBytes) / 2 - 1 || route < Math.pow(2, 8 * this.routeBytes) / -2) {
+          throw 'route overflow';
+        }
+        if (this.seqBytes > 0 && (seq > Math.pow(2, 8 * this.seqBytes) / 2 - 1 || seq < Math.pow(2, 8 * this.seqBytes) / -2)) {
+          throw 'seq overflow';
+        }
+        if (message.buffer && message.buffer.length > this.bufferBytes) {
+          throw 'message too large';
+        }
         var arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + size);
         var dataView = new DataView(arrayBuffer);
-        dataView.setUint32(offset, size);
+        dataView.setUint32(offset, size, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
         dataView.setUint8(offset, 0);
         offset += DEFAULT_HEADER_BYTES;
-        switch (this.opts.routeBytes) {
+        switch (this.routeBytes) {
           case 1:
             dataView.setInt8(offset, route);
             break;
           case 2:
-            dataView.setInt16(offset, route);
+            dataView.setInt16(offset, route, isLittleEndian);
             break;
           case 4:
-            dataView.setInt32(offset, route);
+            dataView.setInt32(offset, route, isLittleEndian);
             break;
         }
-        offset += this.opts.routeBytes || 0;
-        switch (this.opts.seqBytes) {
+        offset += this.routeBytes;
+        switch (this.seqBytes) {
           case 1:
             dataView.setInt8(offset, seq);
             break;
           case 2:
-            dataView.setInt16(offset, seq);
+            dataView.setInt16(offset, seq, isLittleEndian);
             break;
           case 4:
-            dataView.setInt32(offset, seq);
+            dataView.setInt32(offset, seq, isLittleEndian);
             break;
         }
-        offset += this.opts.seqBytes || 0;
+        offset += this.seqBytes;
         if (message.buffer) {
           for (var i = 0; i < message.buffer.length; i++) {
             dataView.setUint8(offset, message.buffer[i]);
@@ -158,14 +169,15 @@
       value: function unpack(data) {
         var offset = 0;
         var dataView = new DataView(data);
-        var size = dataView.getUint32(offset);
+        var isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
+        var size = dataView.getUint32(offset, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
         var header = dataView.getUint8(offset);
         offset += DEFAULT_HEADER_BYTES;
         var isHeartbeat = header >> 7 == 1;
         if (isHeartbeat) {
           if (size + DEFAULT_SIZE_BYTES > offset) {
-            var millisecond = Number(dataView.getBigUint64(offset).toString());
+            var millisecond = Number(dataView.getBigUint64(offset, isLittleEndian).toString());
             offset += DEFAULT_TIMESTAMP_BYTES;
             return {
               isHeartbeat: isHeartbeat,
@@ -181,34 +193,35 @@
             seq: 0,
             route: 0
           };
-          if (this.opts.routeBytes) {
-            switch (this.opts.routeBytes) {
+          if (this.routeBytes) {
+            switch (this.routeBytes) {
               case 1:
                 message.route = dataView.getInt8(offset);
                 break;
               case 2:
-                message.route = dataView.getInt16(offset);
+                message.route = dataView.getInt16(offset, isLittleEndian);
                 break;
               case 4:
-                message.route = dataView.getInt32(offset);
+                message.route = dataView.getInt32(offset, isLittleEndian);
                 break;
             }
           }
-          offset += this.opts.routeBytes || 0;
-          switch (this.opts.seqBytes) {
+          offset += this.routeBytes;
+          switch (this.seqBytes) {
             case 1:
               message.seq = dataView.getInt8(offset);
               break;
             case 2:
-              message.seq = dataView.getInt16(offset);
+              message.seq = dataView.getInt16(offset, isLittleEndian);
               break;
             case 4:
-              message.seq = dataView.getInt32(offset);
+              message.seq = dataView.getInt32(offset, isLittleEndian);
               break;
           }
-          offset += this.opts.seqBytes || 0;
+          offset += this.seqBytes;
           if (size + DEFAULT_SIZE_BYTES > offset) {
             message.buffer = new Uint8Array(data, offset);
+            offset += message.buffer.length;
           }
           return {
             isHeartbeat: isHeartbeat,
@@ -249,13 +262,13 @@
           this.websocket.binaryType = 'arraybuffer';
           this.websocket.onopen = function (ev) {
             _this.heartbeat();
-            _this.connectHandler && _this.connectHandler();
+            _this.connectHandler && _this.connectHandler(_this);
           };
           this.websocket.onclose = function (ev) {
-            _this.disconnectHandler && _this.disconnectHandler();
+            _this.disconnectHandler && _this.disconnectHandler(_this);
           };
           this.websocket.onerror = function (ev) {
-            _this.errorHandler && _this.errorHandler();
+            _this.errorHandler && _this.errorHandler(_this);
           };
           this.websocket.onmessage = function (e) {
             if (e.data.byteLength == 0) {
@@ -263,13 +276,9 @@
             }
             var packet = _this.packer.unpack(e.data);
             if (packet.isHeartbeat) {
-              _this.heartbeatHandler && _this.heartbeatHandler(packet.millisecond);
+              _this.heartbeatHandler && _this.heartbeatHandler(_this, packet.millisecond);
             } else {
-              if (packet.message) {
-                if (!_this.invoke(packet.message)) {
-                  _this.receiveHandler && _this.receiveHandler(packet.message);
-                } else {}
-              }
+              packet.message && (_this.invoke(packet.message) || _this.receiveHandler && _this.receiveHandler(_this, packet.message));
             }
           };
           return true;
@@ -286,15 +295,7 @@
         }
         this.intervalId && clearInterval(this.intervalId);
         this.intervalId = null;
-        var websocket = this.websocket;
-        this.websocket = undefined;
-        websocket.onclose;
-        var onempty = function onempty() {};
-        websocket.onopen = onempty;
-        websocket.onmessage = onempty;
-        websocket.onclose = onempty;
-        websocket.onerror = onempty;
-        websocket.close();
+        this.websocket.close();
       }
     }, {
       key: "heartbeat",
@@ -391,7 +392,7 @@
     }, {
       key: "invoke",
       value: function invoke(message) {
-        if (message.seq == 0) {
+        if (message.seq === undefined || message.seq === 0) {
           return false;
         }
         var group = this.waitgroup.get(message.route);

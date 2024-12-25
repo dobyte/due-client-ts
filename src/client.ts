@@ -10,23 +10,23 @@ export interface ClientOptions {
 }
 
 export interface ConnectHandler {
-    (): any
+    (client: Client): any
 }
 
 export interface DisconnectHandler {
-    (): any
+    (client: Client): any
 }
 
 export interface ReceiveHandler {
-    (message: Message): any
+    (client: Client, message: Message): any
 }
 
 export interface ErrorHandler {
-    (): any
+    (client: Client): any
 }
 
 export interface HeartbeatHandler {
-    (millisecond?: number): any
+    (client: Client, millisecond?: number): any
 }
 
 export class Client {
@@ -79,17 +79,17 @@ export class Client {
             this.websocket.onopen = (ev: Event) => {
                 this.heartbeat();
 
-                this.connectHandler && this.connectHandler();
+                this.connectHandler && this.connectHandler(this);
             }
 
             // 监听WS连接关闭
             this.websocket.onclose = (ev: CloseEvent) => {
-                this.disconnectHandler && this.disconnectHandler();
+                this.disconnectHandler && this.disconnectHandler(this);
             }
 
             // 监听WS连接错误
             this.websocket.onerror = (ev: Event) => {
-                this.errorHandler && this.errorHandler();
+                this.errorHandler && this.errorHandler(this);
             }
 
             // 监听WS消息
@@ -101,9 +101,9 @@ export class Client {
                 const packet = this.packer.unpack(e.data);
 
                 if (packet.isHeartbeat) {
-                    this.heartbeatHandler && this.heartbeatHandler(packet.millisecond);
+                    this.heartbeatHandler && this.heartbeatHandler(this, packet.millisecond);
                 } else {
-                    packet.message && (this.invoke(packet.message) || this.receiveHandler && this.receiveHandler(packet.message));
+                    packet.message && (this.invoke(packet.message) || this.receiveHandler && this.receiveHandler(this, packet.message));
                 }
             }
 
@@ -125,15 +125,7 @@ export class Client {
 
         this.intervalId && clearInterval(this.intervalId);
         this.intervalId = null;
-        const websocket = this.websocket;
-        this.websocket = undefined;
-        const onclose = websocket.onclose;
-        const onempty = () => { };
-        websocket.onopen = onempty;
-        websocket.onmessage = onempty;
-        websocket.onclose = onempty;
-        websocket.onerror = onempty;
-        websocket.close();
+        this.websocket.close();
     }
 
     /**

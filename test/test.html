@@ -27,42 +27,90 @@
             byteOrder: 'big',
             seqBytes: 0,
             routeBytes: 4,
+            bufferBytes: 5000
         })
     });
 
+    // 发送请求响应
+    const request = (c) => {
+        let counter = 0;
+
+        let i = setInterval(() => {
+            if (counter >= 10) {
+                // 清理定时器
+                clearInterval(i);
+                // 关闭连接
+                c.disconnect();
+            }
+
+            // 发送消息
+            try {
+                c.request(1, buffer, 2000).then((message) => {
+                    document.write('response message: ', (new TextDecoder).decode(message.buffer), '<br/>');
+                }).catch(() => {
+                    document.write('reject', '<br/>');
+                });
+
+                counter++;
+            } catch (error) {
+                console.log(error);
+            }
+        }, 1000);
+    }
+
+    // 发送异步消息
+    const send = (c) => {
+        let counter = 0;
+
+        let i = setInterval(() => {
+            if (counter >= 10) {
+                // 清理定时器
+                clearInterval(i);
+                // 关闭连接
+                c.disconnect();
+            }
+
+            // 发送消息
+            try {
+                c.send({
+                    route: 1,
+                    buffer: buffer
+                });
+
+                counter++;
+            } catch (error) {
+                console.log(error);
+            }
+        }, 1000);
+    }
+
     // 监听连接
-    client.onConnect(() => {
-        console.log('connect');
+    client.onConnect((c) => {
+        document.write('connect success', '<br/>');
 
         // 发送同步请求，需要客户端和服务器同时开启seq配置
-        // client.request(1, buffer, 2000).then((message) => {
-        //     console.log('resolve', message);
-        // }).catch(() => {
-        //     console.log('reject');
-        // });
+        request(c);
 
         // 发送异步消息
-        setInterval(() => {
-            client.send({
-                route: 1,
-                buffer: buffer
-            });
-        }, 1000);
+        // send(c);
     });
 
     // 监听连接断开
-    client.onDisconnect(() => {
-        console.log('disconnect');
+    client.onDisconnect((c) => {
+        document.write('disconnect success', '<br/>');
+
+        // 重新连接
+        c.connect();
     });
 
     // 监听接收到消息
-    client.onReceive((message) => {
-        console.log(JSON.parse((new TextDecoder).decode(message.buffer)));
+    client.onReceive((c, message) => {
+        document.write('receive message: ', (new TextDecoder).decode(message.buffer), '<br/>');
     });
 
     // 监听接受服务器的心跳附带的服务器时间
-    client.onHeartbeat((millisecond) => {
-        millisecond && console.log(millisecond);
+    client.onHeartbeat((c, millisecond) => {
+        millisecond && document.write("server heartbeat timestamp: ", millisecond, '<br/>');
     });
 
     // 建立连接

@@ -1,7 +1,8 @@
 export interface PackerOptions {
-    byteOrder?: string;
-    seqBytes?: number;
-    routeBytes?: number;
+    byteOrder?: 'big' | 'little';
+    seqBytes?: 0 | 1 | 2 | 4;
+    routeBytes?: 1 | 2 | 4;
+    bufferBytes?: number;
 }
 export interface Message {
     seq?: number;
@@ -14,7 +15,10 @@ export interface Packet {
     message?: Message;
 }
 export declare class Packer {
-    private opts;
+    private byteOrder;
+    private seqBytes;
+    private routeBytes;
+    private bufferBytes;
     private heartbeat;
     constructor(opts?: PackerOptions);
     packHeartbeat(): ArrayBuffer;

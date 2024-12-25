@@ -1,10 +1,12 @@
 export interface PackerOptions {
     // 字节序；默认为big
-    byteOrder?: string;
+    byteOrder?: 'big' | 'little';
     // 序列号字节长度（字节），长度为0时不开启序列号编码；默认为2字节，最大值为65535
-    seqBytes?: number;
+    seqBytes?: 0 | 1 | 2 | 4;
     // 路由字节长度（字节）；默认为2字节，最大值为65535
-    routeBytes?: number;
+    routeBytes?: 1 | 2 | 4;
+    // 消息字节长度（字节）；默认为5000字节
+    bufferBytes?: number;
 }
 
 export interface Message {
@@ -53,14 +55,22 @@ const DEFAULT_TIMESTAMP_BYTES = 8;
 const DEFAULT_BUFFER_BYTES = 5000;
 
 export class Packer {
-    private opts: PackerOptions;
+    // 字节序；默认为big
+    private byteOrder: 'big' | 'little';
+    // 序列号字节长度（字节），长度为0时不开启序列号编码；默认为2字节，最大值为65535
+    private seqBytes: 0 | 1 | 2 | 4;
+    // 路由字节长度（字节）；默认为2字节，最大值为65535
+    private routeBytes: 1 | 2 | 4;
+    // 消息字节长度（字节）；默认为5000字节
+    private bufferBytes: number;
+    // 默认心跳数据包
     private heartbeat: ArrayBuffer;
 
     public constructor(opts?: PackerOptions) {
-        this.opts = opts || { byteOrder: DEFAULT_BYTE_ORDER, routeBytes: DEFAULT_ROUTE_BYTES, seqBytes: DEFAULT_SEQ_BYTES };
-        this.opts.byteOrder = this.opts.byteOrder !== undefined ? this.opts.byteOrder : DEFAULT_BYTE_ORDER;
-        this.opts.routeBytes = this.opts.routeBytes !== undefined ? this.opts.routeBytes : DEFAULT_ROUTE_BYTES;
-        this.opts.seqBytes = this.opts.seqBytes !== undefined ? this.opts.seqBytes : DEFAULT_SEQ_BYTES;
+        this.byteOrder = opts ? (opts.byteOrder ? opts.byteOrder : DEFAULT_BYTE_ORDER) : DEFAULT_BYTE_ORDER;
+        this.routeBytes = opts ? (opts.routeBytes ? opts.routeBytes : DEFAULT_ROUTE_BYTES) : DEFAULT_ROUTE_BYTES;
+        this.seqBytes = opts ? (opts.seqBytes !== undefined ? opts.seqBytes : DEFAULT_SEQ_BYTES) : DEFAULT_SEQ_BYTES;
+        this.bufferBytes = opts ? (opts.bufferBytes !== undefined ? opts.bufferBytes : DEFAULT_BUFFER_BYTES) : DEFAULT_BUFFER_BYTES;
         this.heartbeat = this.doPackHeartbeat();
     }
 
@@ -97,43 +107,57 @@ export class Packer {
      */
     public packMessage(message: Message): ArrayBuffer {
         let seq = message.seq || 0;
-        let route = message.route || 0;
+        let route = message.route;
         let offset = 0;
-        let size = DEFAULT_HEADER_BYTES + (this.opts.routeBytes || 0) + (this.opts.seqBytes || 0) + (message.buffer ? message.buffer.length : 0);
+        let size = DEFAULT_HEADER_BYTES + this.routeBytes + this.seqBytes + (message.buffer ? message.buffer.length : 0);
+        let isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
+
+        if (route > Math.pow(2, 8 * this.routeBytes) / 2 - 1 || route < Math.pow(2, 8 * this.routeBytes) / -2) {
+            throw 'route overflow';
+        }
+
+        if (this.seqBytes > 0 && (seq > Math.pow(2, 8 * this.seqBytes) / 2 - 1 || seq < Math.pow(2, 8 * this.seqBytes) / -2)) {
+            throw 'seq overflow';
+        }
+
+        if (message.buffer && message.buffer.length > this.bufferBytes) {
+            throw 'message too large';
+        }
+
         let arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + size);
         let dataView = new DataView(arrayBuffer);
 
-        dataView.setUint32(offset, size);
+        dataView.setUint32(offset, size, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
 
         dataView.setUint8(offset, 0);
         offset += DEFAULT_HEADER_BYTES;
 
-        switch (this.opts.routeBytes) {
+        switch (this.routeBytes) {
             case 1:
                 dataView.setInt8(offset, route);
                 break;
             case 2:
-                dataView.setInt16(offset, route);
+                dataView.setInt16(offset, route, isLittleEndian);
                 break;
             case 4:
-                dataView.setInt32(offset, route);
+                dataView.setInt32(offset, route, isLittleEndian);
                 break;
         }
-        offset += this.opts.routeBytes || 0;
+        offset += this.routeBytes;
 
-        switch (this.opts.seqBytes) {
+        switch (this.seqBytes) {
             case 1:
                 dataView.setInt8(offset, seq);
                 break;
             case 2:
-                dataView.setInt16(offset, seq);
+                dataView.setInt16(offset, seq, isLittleEndian);
                 break;
             case 4:
-                dataView.setInt32(offset, seq);
+                dataView.setInt32(offset, seq, isLittleEndian);
                 break;
         }
-        offset += this.opts.seqBytes || 0;
+        offset += this.seqBytes;
 
         if (message.buffer) {
             for (let i = 0; i < message.buffer.length; i++) {
@@ -153,8 +177,9 @@ export class Packer {
     public unpack(data: any): Packet {
         let offset = 0;
         let dataView = new DataView(data);
+        let isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
 
-        let size = dataView.getUint32(offset);
+        let size = dataView.getUint32(offset, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
 
         let header = dataView.getUint8(offset);
@@ -164,7 +189,7 @@ export class Packer {
 
         if (isHeartbeat) {
             if (size + DEFAULT_SIZE_BYTES > offset) {
-                let millisecond = Number(dataView.getBigUint64(offset).toString());
+                let millisecond = Number(dataView.getBigUint64(offset, isLittleEndian).toString());
                 offset += DEFAULT_TIMESTAMP_BYTES;
 
                 return { isHeartbeat, millisecond };
@@ -174,36 +199,37 @@ export class Packer {
         } else {
             let message: Message = { seq: 0, route: 0 };
 
-            if (this.opts.routeBytes) {
-                switch (this.opts.routeBytes) {
+            if (this.routeBytes) {
+                switch (this.routeBytes) {
                     case 1:
                         message.route = dataView.getInt8(offset);
                         break;
                     case 2:
-                        message.route = dataView.getInt16(offset);
+                        message.route = dataView.getInt16(offset, isLittleEndian);
                         break;
                     case 4:
-                        message.route = dataView.getInt32(offset);
+                        message.route = dataView.getInt32(offset, isLittleEndian);
                         break;
                 }
             }
-            offset += this.opts.routeBytes || 0;
+            offset += this.routeBytes;
 
-            switch (this.opts.seqBytes) {
+            switch (this.seqBytes) {
                 case 1:
                     message.seq = dataView.getInt8(offset);
                     break;
                 case 2:
-                    message.seq = dataView.getInt16(offset);
+                    message.seq = dataView.getInt16(offset, isLittleEndian);
                     break;
                 case 4:
-                    message.seq = dataView.getInt32(offset);
+                    message.seq = dataView.getInt32(offset, isLittleEndian);
                     break;
             }
-            offset += this.opts.seqBytes || 0;
+            offset += this.seqBytes;
 
             if (size + DEFAULT_SIZE_BYTES > offset) {
                 message.buffer = new Uint8Array(data, offset);
+                offset += message.buffer.length;
             }
 
             return { isHeartbeat, message };
