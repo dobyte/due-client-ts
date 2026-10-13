@@ -1,6 +1,6 @@
 {
   "name": "due-client",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "a client written in typescript of the due game framework",
   "main": "./dist/index.js",
   "module": "./dist/index.esm.js",
