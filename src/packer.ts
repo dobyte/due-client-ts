@@ -90,8 +90,9 @@ export class Packer {
         let offset = 0;
         let arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + DEFAULT_HEADER_BYTES);
         let dataView = new DataView(arrayBuffer);
+        let isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
 
-        dataView.setUint32(offset, DEFAULT_HEADER_BYTES);
+        dataView.setUint32(offset, DEFAULT_HEADER_BYTES, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
 
         dataView.setUint8(offset, 1 << 7);
@@ -160,10 +161,7 @@ export class Packer {
         offset += this.seqBytes;
 
         if (message.buffer) {
-            for (let i = 0; i < message.buffer.length; i++) {
-                dataView.setUint8(offset, message.buffer[i]);
-                offset += 1;
-            }
+            new Uint8Array(arrayBuffer).set(message.buffer, offset);
         }
 
         return arrayBuffer;
@@ -228,7 +226,7 @@ export class Packer {
             offset += this.seqBytes;
 
             if (size + DEFAULT_SIZE_BYTES > offset) {
-                message.buffer = new Uint8Array(data, offset);
+                message.buffer = new Uint8Array(data, offset, size + DEFAULT_SIZE_BYTES - offset);
                 offset += message.buffer.length;
             }
 

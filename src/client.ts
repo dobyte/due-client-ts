@@ -1,4 +1,4 @@
-import { Packer, Message } from "./packer";
+import { Packer, Message, Packet } from "./packer";
 
 export interface ClientOptions {
     // 连接地址
@@ -48,8 +48,6 @@ export class Client {
     private intervalId: any;
     // 打包器
     private packer: Packer;
-    // 
-    private buffer: any;
     // 同步等待组
     private waitgroup: Map<number, {
         seq: number;
@@ -72,33 +70,48 @@ export class Client {
             this.disconnect();
 
             // 新建WS客户端
-            this.websocket = new WebSocket(this.opts.url);
-            this.websocket.binaryType = 'arraybuffer';
+            const websocket = new WebSocket(this.opts.url);
+            websocket.binaryType = 'arraybuffer';
+            this.websocket = websocket;
 
             // 监听WS连接打开
-            this.websocket.onopen = (ev: Event) => {
+            websocket.onopen = () => {
                 this.heartbeat();
 
                 this.connectHandler && this.connectHandler(this);
             }
 
             // 监听WS连接关闭
-            this.websocket.onclose = (ev: CloseEvent) => {
+            websocket.onclose = () => {
+                // 忽略已被新连接替换的旧socket的关闭事件
+                if (this.websocket !== websocket) {
+                    return;
+                }
+
+                this.stopHeartbeat();
+
                 this.disconnectHandler && this.disconnectHandler(this);
             }
 
             // 监听WS连接错误
-            this.websocket.onerror = (ev: Event) => {
+            websocket.onerror = () => {
                 this.errorHandler && this.errorHandler(this);
             }
 
             // 监听WS消息
-            this.websocket.onmessage = (e: MessageEvent) => {
+            websocket.onmessage = (e: MessageEvent) => {
                 if (e.data.byteLength == 0) {
                     return;
                 }
 
-                const packet = this.packer.unpack(e.data);
+                let packet: Packet;
+
+                try {
+                    packet = this.packer.unpack(e.data);
+                } catch (error) {
+                    this.errorHandler && this.errorHandler(this);
+                    return;
+                }
 
                 if (packet.isHeartbeat) {
                     this.heartbeatHandler && this.heartbeatHandler(this, packet.millisecond);
@@ -123,9 +136,17 @@ export class Client {
             return
         }
 
+        this.stopHeartbeat();
+        this.websocket.close();
+    }
+
+    /**
+     * 停止心跳
+     * @returns void
+     */
+    private stopHeartbeat() {
         this.intervalId && clearInterval(this.intervalId);
         this.intervalId = null;
-        this.websocket.close();
     }
 
     /**
@@ -226,32 +247,50 @@ export class Client {
      */
     public request(route: number, buffer?: Uint8Array, timeout?: number): Promise<Message> {
         return new Promise((resolve, reject) => {
-            if (this.isConnected()) {
-                let group = this.waitgroup.get(route);
+            if (!this.isConnected()) {
+                reject(new Error('client not connected'));
+                return;
+            }
 
-                if (group === undefined) {
-                    group = { seq: 0, callback: new Map() };
-                    this.waitgroup.set(route, group);
-                }
+            let group = this.waitgroup.get(route);
 
-                let seq = ++group.seq;
-                let timeoutId: any;
+            if (group === undefined) {
+                group = { seq: 0, callback: new Map() };
+                this.waitgroup.set(route, group);
+            }
 
-                if (timeout && timeout > 0) {
-                    timeoutId = setTimeout(() => {
-                        reject();
-                    }, timeout);
-                }
+            let seq = ++group.seq;
+            let timeoutId: any;
+            let cleanup = () => {
+                group!.callback.delete(seq);
+            };
 
-                group.callback.set(seq, (message: Message) => {
+            if (timeout && timeout > 0) {
+                timeoutId = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('request timeout'));
+                }, timeout);
+            }
+
+            group.callback.set(seq, (message: Message) => {
+                timeoutId && clearTimeout(timeoutId);
+
+                resolve(message);
+            });
+
+            try {
+                if (!this.send({ seq, route, buffer })) {
                     timeoutId && clearTimeout(timeoutId);
+                    cleanup();
 
-                    resolve(message);
-                });
+                    reject(new Error('send message failed'));
+                    return;
+                }
+            } catch (error) {
+                timeoutId && clearTimeout(timeoutId);
+                cleanup();
 
-                this.send({ seq, route, buffer });
-            } else {
-                reject();
+                reject(error);
             }
         })
     }
