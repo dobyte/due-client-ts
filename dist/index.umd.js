@@ -4,69 +4,55 @@
   (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.due = {}));
 })(this, (function (exports) { 'use strict';
 
-  function _classCallCheck(instance, Constructor) {
-    if (!(instance instanceof Constructor)) {
-      throw new TypeError("Cannot call a class as a function");
-    }
+  function _classCallCheck(a, n) {
+    if (!(a instanceof n)) throw new TypeError("Cannot call a class as a function");
   }
 
-  function _typeof(obj) {
+  function _typeof(o) {
     "@babel/helpers - typeof";
 
-    return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) {
-      return typeof obj;
-    } : function (obj) {
-      return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
-    }, _typeof(obj);
+    return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) {
+      return typeof o;
+    } : function (o) {
+      return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o;
+    }, _typeof(o);
   }
 
-  function _toPrimitive(input, hint) {
-    if (_typeof(input) !== "object" || input === null) return input;
-    var prim = input[Symbol.toPrimitive];
-    if (prim !== undefined) {
-      var res = prim.call(input, hint || "default");
-      if (_typeof(res) !== "object") return res;
+  function toPrimitive(t, e) {
+    if ("object" != _typeof(t) || !t) return t;
+    var r;
+    if ("undefined" != typeof Symbol && void 0 !== (r = t[Symbol.toPrimitive])) {
+      var i = r.call(t, e || "default");
+      if ("object" != _typeof(i)) return i;
       throw new TypeError("@@toPrimitive must return a primitive value.");
     }
-    return (hint === "string" ? String : Number)(input);
+    return ("string" === e ? String : Number)(t);
   }
 
-  function _toPropertyKey(arg) {
-    var key = _toPrimitive(arg, "string");
-    return _typeof(key) === "symbol" ? key : String(key);
+  function toPropertyKey(t) {
+    var i = toPrimitive(t, "string");
+    return "symbol" == _typeof(i) ? i : i + "";
   }
 
-  function _defineProperties(target, props) {
-    for (var i = 0; i < props.length; i++) {
-      var descriptor = props[i];
-      descriptor.enumerable = descriptor.enumerable || false;
-      descriptor.configurable = true;
-      if ("value" in descriptor) descriptor.writable = true;
-      Object.defineProperty(target, _toPropertyKey(descriptor.key), descriptor);
+  function _defineProperties(e, r) {
+    for (var t = 0; t < r.length; t++) {
+      var o = r[t];
+      o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, toPropertyKey(o.key), o);
     }
   }
-  function _createClass(Constructor, protoProps, staticProps) {
-    if (protoProps) _defineProperties(Constructor.prototype, protoProps);
-    if (staticProps) _defineProperties(Constructor, staticProps);
-    Object.defineProperty(Constructor, "prototype", {
-      writable: false
-    });
-    return Constructor;
+  function _createClass(e, r, t) {
+    return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", {
+      writable: !1
+    }), e;
   }
 
-  function _defineProperty(obj, key, value) {
-    key = _toPropertyKey(key);
-    if (key in obj) {
-      Object.defineProperty(obj, key, {
-        value: value,
-        enumerable: true,
-        configurable: true,
-        writable: true
-      });
-    } else {
-      obj[key] = value;
-    }
-    return obj;
+  function _defineProperty(e, r, t) {
+    return (r = toPropertyKey(r)) in e ? Object.defineProperty(e, r, {
+      value: t,
+      enumerable: !0,
+      configurable: !0,
+      writable: !0
+    }) : e[r] = t, e;
   }
 
   var BIG_ENDIAN = 'big';
@@ -103,7 +89,8 @@
         var offset = 0;
         var arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + DEFAULT_HEADER_BYTES);
         var dataView = new DataView(arrayBuffer);
-        dataView.setUint32(offset, DEFAULT_HEADER_BYTES);
+        var isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
+        dataView.setUint32(offset, DEFAULT_HEADER_BYTES, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
         dataView.setUint8(offset, 1 << 7);
         offset += DEFAULT_HEADER_BYTES;
@@ -157,10 +144,7 @@
         }
         offset += this.seqBytes;
         if (message.buffer) {
-          for (var i = 0; i < message.buffer.length; i++) {
-            dataView.setUint8(offset, message.buffer[i]);
-            offset += 1;
-          }
+          new Uint8Array(arrayBuffer).set(message.buffer, offset);
         }
         return arrayBuffer;
       }
@@ -220,7 +204,7 @@
           }
           offset += this.seqBytes;
           if (size + DEFAULT_SIZE_BYTES > offset) {
-            message.buffer = new Uint8Array(data, offset);
+            message.buffer = new Uint8Array(data, offset, size + DEFAULT_SIZE_BYTES - offset);
             offset += message.buffer.length;
           }
           return {
@@ -245,7 +229,6 @@
       _defineProperty(this, "websocket", void 0);
       _defineProperty(this, "intervalId", void 0);
       _defineProperty(this, "packer", void 0);
-      _defineProperty(this, "buffer", void 0);
       _defineProperty(this, "waitgroup", void 0);
       this.opts = opts;
       this.websocket = undefined;
@@ -258,23 +241,34 @@
         var _this = this;
         try {
           this.disconnect();
-          this.websocket = new WebSocket(this.opts.url);
-          this.websocket.binaryType = 'arraybuffer';
-          this.websocket.onopen = function (ev) {
+          var websocket = new WebSocket(this.opts.url);
+          websocket.binaryType = 'arraybuffer';
+          this.websocket = websocket;
+          websocket.onopen = function () {
             _this.heartbeat();
             _this.connectHandler && _this.connectHandler(_this);
           };
-          this.websocket.onclose = function (ev) {
+          websocket.onclose = function () {
+            if (_this.websocket !== websocket) {
+              return;
+            }
+            _this.stopHeartbeat();
             _this.disconnectHandler && _this.disconnectHandler(_this);
           };
-          this.websocket.onerror = function (ev) {
+          websocket.onerror = function () {
             _this.errorHandler && _this.errorHandler(_this);
           };
-          this.websocket.onmessage = function (e) {
+          websocket.onmessage = function (e) {
             if (e.data.byteLength == 0) {
               return;
             }
-            var packet = _this.packer.unpack(e.data);
+            var packet;
+            try {
+              packet = _this.packer.unpack(e.data);
+            } catch (error) {
+              _this.errorHandler && _this.errorHandler(_this);
+              return;
+            }
             if (packet.isHeartbeat) {
               _this.heartbeatHandler && _this.heartbeatHandler(_this, packet.millisecond);
             } else {
@@ -293,9 +287,14 @@
         if (!this.websocket) {
           return;
         }
+        this.stopHeartbeat();
+        this.websocket.close();
+      }
+    }, {
+      key: "stopHeartbeat",
+      value: function stopHeartbeat() {
         this.intervalId && clearInterval(this.intervalId);
         this.intervalId = null;
-        this.websocket.close();
       }
     }, {
       key: "heartbeat",
@@ -359,33 +358,48 @@
       value: function request(route, buffer, timeout) {
         var _this3 = this;
         return new Promise(function (resolve, reject) {
-          if (_this3.isConnected()) {
-            var group = _this3.waitgroup.get(route);
-            if (group === undefined) {
-              group = {
-                seq: 0,
-                callback: new Map()
-              };
-              _this3.waitgroup.set(route, group);
-            }
-            var seq = ++group.seq;
-            var timeoutId;
-            if (timeout && timeout > 0) {
-              timeoutId = setTimeout(function () {
-                reject();
-              }, timeout);
-            }
-            group.callback.set(seq, function (message) {
-              timeoutId && clearTimeout(timeoutId);
-              resolve(message);
-            });
-            _this3.send({
+          if (!_this3.isConnected()) {
+            reject(new Error('client not connected'));
+            return;
+          }
+          var group = _this3.waitgroup.get(route);
+          if (group === undefined) {
+            group = {
+              seq: 0,
+              callback: new Map()
+            };
+            _this3.waitgroup.set(route, group);
+          }
+          var seq = ++group.seq;
+          var timeoutId;
+          var cleanup = function cleanup() {
+            group.callback["delete"](seq);
+          };
+          if (timeout && timeout > 0) {
+            timeoutId = setTimeout(function () {
+              cleanup();
+              reject(new Error('request timeout'));
+            }, timeout);
+          }
+          group.callback.set(seq, function (message) {
+            timeoutId && clearTimeout(timeoutId);
+            resolve(message);
+          });
+          try {
+            if (!_this3.send({
               seq: seq,
               route: route,
               buffer: buffer
-            });
-          } else {
-            reject();
+            })) {
+              timeoutId && clearTimeout(timeoutId);
+              cleanup();
+              reject(new Error('send message failed'));
+              return;
+            }
+          } catch (error) {
+            timeoutId && clearTimeout(timeoutId);
+            cleanup();
+            reject(error);
           }
         });
       }

@@ -29,11 +29,11 @@ export declare class Client {
     private websocket?;
     private intervalId;
     private packer;
-    private buffer;
     private waitgroup;
     constructor(opts: ClientOptions);
     connect(): boolean;
     disconnect(): void;
+    private stopHeartbeat;
     private heartbeat;
     onConnect(handler: ConnectHandler): void;
     onDisconnect(handler: DisconnectHandler): void;
