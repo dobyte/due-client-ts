@@ -9,26 +9,44 @@ export interface ClientOptions {
     heartbeat: number;
 }
 
+/**
+ * 连接打开回调
+ */
 export interface ConnectHandler {
     (client: Client): any
 }
 
+/**
+ * 连接关闭回调
+ */
 export interface DisconnectHandler {
     (client: Client): any
 }
 
+/**
+ * 接收消息回调
+ */
 export interface ReceiveHandler {
     (client: Client, message: Message): any
 }
 
+/**
+ * 错误回调
+ */
 export interface ErrorHandler {
     (client: Client): any
 }
 
+/**
+ * 心跳回调
+ */
 export interface HeartbeatHandler {
     (client: Client, millisecond?: number): any
 }
 
+/**
+ * 客户端
+ */
 export class Client {
     // 连接打开hook函数
     private connectHandler?: ConnectHandler;
@@ -241,9 +259,9 @@ export class Client {
     /**
      * 请求C/S模型，需要客户端和服务器同时开启seq配置支持
      * @param route 路由
-     * @param data 数据
-     * @param timeout 超时时间
-     * @returns 
+     * @param buffer 数据
+     * @param timeout 超时时间（毫秒），大于0时生效
+     * @returns Promise<Message> 服务器响应消息
      */
     public request(route: number, buffer?: Uint8Array, timeout?: number): Promise<Message> {
         return new Promise((resolve, reject) => {

@@ -1,3 +1,6 @@
+/**
+ * 打包器配置
+ */
 export interface PackerOptions {
     // 字节序；默认为big
     byteOrder?: 'big' | 'little';
@@ -9,6 +12,9 @@ export interface PackerOptions {
     bufferBytes?: number;
 }
 
+/**
+ * 消息
+ */
 export interface Message {
     // 消息序列号
     seq?: number;
@@ -18,6 +24,9 @@ export interface Message {
     buffer?: Uint8Array;
 }
 
+/**
+ * 数据包
+ */
 export interface Packet {
     // 是否是心跳包
     isHeartbeat: boolean;
@@ -54,6 +63,9 @@ const DEFAULT_TIMESTAMP_BYTES = 8;
 // 默认buffer数据位字节长度
 const DEFAULT_BUFFER_BYTES = 5000;
 
+/**
+ * 打包器
+ */
 export class Packer {
     // 字节序；默认为big
     private byteOrder: 'big' | 'little';
@@ -170,7 +182,7 @@ export class Packer {
     /**
      * 解包消息
      * @param data 二进制数据
-     * @returns Message
+     * @returns Packet 解包结果
      */
     public unpack(data: any): Packet {
         let offset = 0;
