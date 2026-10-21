@@ -30,8 +30,12 @@ export interface Message {
 export interface Packet {
     // 是否是心跳包
     isHeartbeat: boolean;
+    // 是否是安全握手包
+    isHandshake: boolean;
     // 心跳包携带的服务器时间（毫秒）
     millisecond?: number;
+    // 握手包携带的载荷数据
+    handshake?: Uint8Array;
     // 消息数据
     message?: Message;
 }
@@ -62,6 +66,12 @@ const DEFAULT_TIMESTAMP_BYTES = 8;
 
 // 默认buffer数据位字节长度
 const DEFAULT_BUFFER_BYTES = 5000;
+
+// 心跳包头标记位
+const HEARTBEAT_BIT = 1 << 7;
+
+// 安全握手包头标记位
+const HANDSHAKE_BIT = 1 << 0;
 
 /**
  * 打包器
@@ -107,8 +117,33 @@ export class Packer {
         dataView.setUint32(offset, DEFAULT_HEADER_BYTES, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
 
-        dataView.setUint8(offset, 1 << 7);
+        dataView.setUint8(offset, HEARTBEAT_BIT);
         offset += DEFAULT_HEADER_BYTES;
+
+        return arrayBuffer;
+    }
+
+    /**
+     * 打包安全握手帧
+     *
+     * 握手帧不携带 route 与 seq，仅由包头标记位区分
+     * @param payload 握手载荷
+     * @returns ArrayBuffer
+     */
+    public packHandshake(payload: Uint8Array): ArrayBuffer {
+        if (payload.length > this.bufferBytes) {
+            throw 'handshake too large';
+        }
+
+        const size = DEFAULT_HEADER_BYTES + payload.length;
+        const arrayBuffer = new ArrayBuffer(DEFAULT_SIZE_BYTES + size);
+        const dataView = new DataView(arrayBuffer);
+        const isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
+
+        dataView.setUint32(0, size, isLittleEndian);
+        dataView.setUint8(DEFAULT_SIZE_BYTES, HANDSHAKE_BIT);
+
+        new Uint8Array(arrayBuffer).set(payload, DEFAULT_SIZE_BYTES + DEFAULT_HEADER_BYTES);
 
         return arrayBuffer;
     }
@@ -184,7 +219,7 @@ export class Packer {
      * @param data 二进制数据
      * @returns Packet 解包结果
      */
-    public unpack(data: any): Packet {
+    public unpack(data: ArrayBuffer): Packet {
         let offset = 0;
         let dataView = new DataView(data);
         let isLittleEndian = this.byteOrder == LITTLE_ENDIAN;
@@ -192,57 +227,71 @@ export class Packer {
         let size = dataView.getUint32(offset, isLittleEndian);
         offset += DEFAULT_SIZE_BYTES;
 
+        if (size + DEFAULT_SIZE_BYTES > data.byteLength) {
+            throw 'invalid packet';
+        }
+
         let header = dataView.getUint8(offset);
         offset += DEFAULT_HEADER_BYTES;
 
-        let isHeartbeat = header >> 7 == 1;
+        let isHeartbeat = (header & HEARTBEAT_BIT) == HEARTBEAT_BIT;
 
         if (isHeartbeat) {
             if (size + DEFAULT_SIZE_BYTES > offset) {
                 let millisecond = Number(dataView.getBigUint64(offset, isLittleEndian).toString());
                 offset += DEFAULT_TIMESTAMP_BYTES;
 
-                return { isHeartbeat, millisecond };
+                return { isHeartbeat, isHandshake: false, millisecond };
             } else {
-                return { isHeartbeat };
+                return { isHeartbeat, isHandshake: false };
             }
-        } else {
-            let message: Message = { seq: 0, route: 0 };
+        }
 
-            if (this.routeBytes) {
-                switch (this.routeBytes) {
-                    case 1:
-                        message.route = dataView.getInt8(offset);
-                        break;
-                    case 2:
-                        message.route = dataView.getInt16(offset, isLittleEndian);
-                        break;
-                    case 4:
-                        message.route = dataView.getInt32(offset, isLittleEndian);
-                        break;
-                }
-            }
-            offset += this.routeBytes;
+        if ((header & HANDSHAKE_BIT) == HANDSHAKE_BIT) {
+            const end = DEFAULT_SIZE_BYTES + size;
 
-            switch (this.seqBytes) {
+            return {
+                isHeartbeat: false,
+                isHandshake: true,
+                handshake: end > offset ? new Uint8Array(data, offset, end - offset) : new Uint8Array(0),
+            };
+        }
+
+        let message: Message = { seq: 0, route: 0 };
+
+        if (this.routeBytes) {
+            switch (this.routeBytes) {
                 case 1:
-                    message.seq = dataView.getInt8(offset);
+                    message.route = dataView.getInt8(offset);
                     break;
                 case 2:
-                    message.seq = dataView.getInt16(offset, isLittleEndian);
+                    message.route = dataView.getInt16(offset, isLittleEndian);
                     break;
                 case 4:
-                    message.seq = dataView.getInt32(offset, isLittleEndian);
+                    message.route = dataView.getInt32(offset, isLittleEndian);
                     break;
             }
-            offset += this.seqBytes;
-
-            if (size + DEFAULT_SIZE_BYTES > offset) {
-                message.buffer = new Uint8Array(data, offset, size + DEFAULT_SIZE_BYTES - offset);
-                offset += message.buffer.length;
-            }
-
-            return { isHeartbeat, message };
         }
+        offset += this.routeBytes;
+
+        switch (this.seqBytes) {
+            case 1:
+                message.seq = dataView.getInt8(offset);
+                break;
+            case 2:
+                message.seq = dataView.getInt16(offset, isLittleEndian);
+                break;
+            case 4:
+                message.seq = dataView.getInt32(offset, isLittleEndian);
+                break;
+        }
+        offset += this.seqBytes;
+
+        if (size + DEFAULT_SIZE_BYTES > offset) {
+            message.buffer = new Uint8Array(data, offset, size + DEFAULT_SIZE_BYTES - offset);
+            offset += message.buffer.length;
+        }
+
+        return { isHeartbeat, isHandshake: false, message };
     }
 }

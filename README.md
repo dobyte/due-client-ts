@@ -160,6 +160,104 @@ client.onHeartbeat((c, millisecond) => {
 client.connect();
 ```
 
+### 6.会话安全（security）
+
+客户端支持与 due 网关进行会话安全握手，握手完成后业务消息自动加解密。协议与 due 服务端 `core/security/handshake` 保持一致：
+
+1. 客户端发送 `ClientHello`：random(32) | X25519 公钥(32) | 套件数量(1) | 套件列表
+2. 服务端回复 `ServerHello`：套件(1) | random(32) | X25519 公钥(32) | 签名长度(2) | 签名 | MAC(32)
+3. 客户端校验签名与 MAC 后发送 `Finished`，握手完成
+
+会话数据使用 AEAD 加密，封包格式为 `epoch(1) | counter(8) | ciphertext | tag`，AAD 绑定 version、direction、epoch、route 与 seq。
+
+#### 6.1 启用方式
+
+```js
+import { Client, Packer, Verifier, DEFAULT_SUITES } from 'due-client';
+
+const client = new Client({
+    url: 'ws://127.0.0.1:3553',
+    heartbeat: 10000,
+    packer: new Packer({
+        byteOrder: 'big',
+        seqBytes: 4,
+        routeBytes: 4,
+        bufferBytes: 5000
+    }),
+    security: {
+        // 服务端签名校验器
+        verifier: Verifier.ecdsa(publicKey, 'sha256', ' '),
+        // 可选，默认 [AES-256-GCM, ChaCha20-Poly1305]
+        suites: DEFAULT_SUITES,
+        // 可选，握手超时时间（毫秒），默认 5000，小于等于 0 表示不限制
+        handshakeTimeout: 5000
+    }
+});
+
+// 握手成功后才触发 onConnect
+client.onConnect((c) => {
+    // 此处收发的业务消息已自动加解密
+});
+
+// 签名校验失败、握手超时等会触发 onError，并关闭连接
+client.onError(() => {
+    console.log('connect error');
+});
+
+client.connect();
+```
+
+未配置 `security` 时保持原有明文通信行为。
+
+#### 6.2 签名校验器
+
+签名校验器与服务端 `[crypto.ecc.signer]` / `[crypto.rsa.signer]` 配置对应，公钥支持 PEM、base64 或 DER：
+
+```js
+// ECDSA，支持 P-256 / P-384 / P-521；签名格式为 “r<分隔符>s” 的十进制文本
+Verifier.ecdsa(publicKey, 'sha256', ' ');
+
+// RSA，默认 PSS 填充；pss 为 false 时使用 PKCS#1 v1.5
+Verifier.rsa(publicKey, 'sha256', true);
+```
+
+注意：
+
+- `hash` 必须与服务端 `[crypto.ecc.signer] hash` / `[crypto.rsa.signer] hash` 一致
+- `delimiter` 必须与服务端 `delimiter` 一致（默认空格）
+- 服务端未开启会话安全时不要配置 `security`，否则握手会失败
+
+#### 6.3 参数说明
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `verifier` | 是 | 服务端签名校验器，由 `Verifier.ecdsa` / `Verifier.rsa` 创建 |
+| `suites` | 否 | 允许协商的 AEAD 套件，默认 `DEFAULT_SUITES` |
+| `handshakeTimeout` | 否 | 握手超时时间（毫秒），默认 5000，小于等于 0 表示不限制 |
+| `random` | 否 | 随机字节源 `(length) => Uint8Array`；运行环境无 `crypto.getRandomValues` 时需注入 |
+
+#### 6.4 打包器与容量
+
+- `byteOrder`、`routeBytes`、`seqBytes`、`bufferBytes` 必须与网关的 `[packet]` 配置一致
+- 使用 `request()` 或依赖回包匹配时应开启 seq（`seqBytes > 0`）
+- 启用 security 时，业务明文上限为 `bufferBytes - 25`（epoch 1 + counter 8 + tag 16），超限会触发 `message too large`
+
+#### 6.5 导出的安全能力
+
+```js
+export {
+    HandshakeClient,      // 握手客户端
+    SecureSession,        // 安全会话，seal/open 业务载荷
+    Direction,            // 消息方向
+    makeAAD,              // AAD 构造
+    Verifier,             // 内置签名校验器
+    parsePublicKey,       // PEM/base64/DER 公钥解析
+    DEFAULT_SUITES,
+    SUITE_AES_GCM,
+    SUITE_CHACHA20_POLY1305
+};
+```
+
 ## License
 
 [MIT](https://tldrlegal.com/license/mit-license)

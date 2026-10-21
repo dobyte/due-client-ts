@@ -1,0 +1,12 @@
+export type RandomSource = (length: number) => Uint8Array;
+export declare function randomBytes(length: number, source?: RandomSource): Uint8Array;
+export declare function concatBytes(...arrays: Uint8Array[]): Uint8Array;
+export declare function equalBytes(a: Uint8Array, b: Uint8Array): boolean;
+export declare function utf8Bytes(text: string): Uint8Array;
+export declare function readUint32BE(data: Uint8Array, offset?: number): number;
+export declare function writeUint32BE(data: Uint8Array, offset: number, value: number): void;
+export declare function writeUint64BE(data: Uint8Array, offset: number, value: bigint): void;
+export declare function readUint64BE(data: Uint8Array, offset?: number): bigint;
+export declare function bytesToBigInt(data: Uint8Array): bigint;
+export declare function bigIntToBytes(value: bigint, length: number): Uint8Array;
+export declare function base64Decode(text: string): Uint8Array;

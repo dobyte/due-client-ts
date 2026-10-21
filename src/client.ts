@@ -1,5 +1,34 @@
 import { Packer, Message, Packet } from "./packer";
+import { HandshakeClient, HandshakeVerifier, RandomSource, SecureSession } from "./security";
 
+// 默认握手超时时间（毫秒）
+const DEFAULT_HANDSHAKE_TIMEOUT = 5000;
+
+// 消息方向（与 security 模块保持一致）
+const CLIENT_TO_SERVER = 0;
+const SERVER_TO_CLIENT = 1;
+
+/**
+ * 会话安全配置
+ *
+ * 与 Unity 版 SecurityOptions 对齐：
+ * verifier 为服务端签名校验器（Verifier.ecdsa / Verifier.rsa），
+ * suites 为协商套件，handshakeTimeout 为握手超时。
+ */
+export interface SecurityOptions {
+    // 服务端签名校验器；由 Verifier.ecdsa / Verifier.rsa 创建
+    verifier: HandshakeVerifier;
+    // 允许协商的 AEAD 套件，默认为 [AES-256-GCM, ChaCha20-Poly1305]
+    suites?: number[];
+    // 握手超时时间（毫秒），默认 5000，小于等于 0 表示不限制
+    handshakeTimeout?: number;
+    // 随机字节源；原生平台未提供 crypto.getRandomValues 时需要注入
+    random?: RandomSource;
+}
+
+/**
+ * 客户端配置
+ */
 export interface ClientOptions {
     // 连接地址
     url: string;
@@ -7,6 +36,8 @@ export interface ClientOptions {
     packer: Packer;
     // 心跳间隔，大于0则开启心跳
     heartbeat: number;
+    // 会话安全配置；不配置则不启用
+    security?: SecurityOptions;
 }
 
 /**
@@ -64,8 +95,16 @@ export class Client {
     private websocket?: WebSocket;
     // 定时器ID
     private intervalId: any;
+    // 握手超时定时器ID
+    private handshakeTimer: any;
     // 打包器
     private packer: Packer;
+    // 会话安全配置
+    private security?: SecurityOptions;
+    // 握手客户端
+    private handshake?: HandshakeClient;
+    // 安全会话
+    private session?: SecureSession;
     // 同步等待组
     private waitgroup: Map<number, {
         seq: number;
@@ -76,6 +115,7 @@ export class Client {
         this.opts = opts;
         this.websocket = undefined;
         this.packer = opts.packer || new Packer(opts.packer);
+        this.security = opts.security;
         this.waitgroup = new Map();
     }
 
@@ -94,9 +134,19 @@ export class Client {
 
             // 监听WS连接打开
             websocket.onopen = () => {
-                this.heartbeat();
+                if (this.websocket !== websocket) {
+                    return;
+                }
 
-                this.connectHandler && this.connectHandler(this);
+                if (this.security) {
+                    try {
+                        this.startHandshake(websocket);
+                    } catch (error) {
+                        this.failHandshake(error);
+                    }
+                } else {
+                    this.established();
+                }
             }
 
             // 监听WS连接关闭
@@ -107,6 +157,9 @@ export class Client {
                 }
 
                 this.stopHeartbeat();
+                this.stopHandshakeTimer();
+                this.handshake = undefined;
+                this.session = undefined;
 
                 this.disconnectHandler && this.disconnectHandler(this);
             }
@@ -118,6 +171,10 @@ export class Client {
 
             // 监听WS消息
             websocket.onmessage = (e: MessageEvent) => {
+                if (this.websocket !== websocket) {
+                    return;
+                }
+
                 if (e.data.byteLength == 0) {
                     return;
                 }
@@ -131,11 +188,40 @@ export class Client {
                     return;
                 }
 
+                if (packet.isHandshake) {
+                    this.receiveHandshake(packet.handshake || new Uint8Array(0));
+                    return;
+                }
+
                 if (packet.isHeartbeat) {
                     this.heartbeatHandler && this.heartbeatHandler(this, packet.millisecond);
-                } else {
-                    packet.message && (this.invoke(packet.message) || this.receiveHandler && this.receiveHandler(this, packet.message));
+                    return;
                 }
+
+                if (!packet.message) {
+                    return;
+                }
+
+                if (this.security) {
+                    if (!this.session) {
+                        this.failHandshake(new Error('security: session is not established'));
+                        return;
+                    }
+
+                    try {
+                        packet.message.buffer = this.session.open(
+                            packet.message.buffer || new Uint8Array(0),
+                            SERVER_TO_CLIENT,
+                            packet.message.route,
+                            packet.message.seq || 0,
+                        );
+                    } catch (error) {
+                        this.failHandshake(error);
+                        return;
+                    }
+                }
+
+                this.invoke(packet.message) || this.receiveHandler && this.receiveHandler(this, packet.message);
             }
 
             return true
@@ -146,10 +232,116 @@ export class Client {
     }
 
     /**
+     * 启动安全握手
+     * @param websocket 当前连接
+     * @returns void
+     */
+    private startHandshake(websocket: WebSocket) {
+        const options = this.security!;
+
+        // 连接可能已关闭或被新连接替换
+        if (this.websocket !== websocket || !this.isConnected()) {
+            return;
+        }
+
+        const verifier = options.verifier;
+
+        if (!verifier) {
+            throw new Error('security: verifier is required');
+        }
+
+        const handshake = new HandshakeClient(verifier, options.suites, options.random);
+        const hello = handshake.hello();
+        const timeout = options.handshakeTimeout === undefined ? DEFAULT_HANDSHAKE_TIMEOUT : options.handshakeTimeout;
+
+        this.handshake = handshake;
+
+        if (timeout > 0) {
+            this.handshakeTimer = setTimeout(() => {
+                this.failHandshake(new Error('security: handshake timeout'));
+            }, timeout);
+        }
+
+        this.sendRaw(this.packer.packHandshake(hello));
+    }
+
+    /**
+     * 处理服务端握手帧
+     * @param frame 握手载荷
+     * @returns void
+     */
+    private receiveHandshake(frame: Uint8Array) {
+        if (!this.security || !this.handshake) {
+            return;
+        }
+
+        try {
+            const { session, finished } = this.handshake.handle(frame);
+
+            // 先发布会话：网关确认后可能立即推送加密消息
+            this.session = session;
+            this.handshake = undefined;
+            this.stopHandshakeTimer();
+            this.sendRaw(this.packer.packHandshake(finished));
+            this.established();
+        } catch (error) {
+            this.failHandshake(error);
+        }
+    }
+
+    /**
+     * 处理握手失败
+     * @param error 错误
+     * @returns void
+     */
+    private failHandshake(error: any) {
+        this.stopHandshakeTimer();
+        this.handshake = undefined;
+        this.session = undefined;
+
+        console.warn('[due] security handshake failed:', error);
+
+        this.websocket && this.websocket.close();
+        this.errorHandler && this.errorHandler(this);
+    }
+
+    /**
+     * 安全握手完成（或未启用安全）后建立连接
+     * @returns void
+     */
+    private established() {
+        this.heartbeat();
+
+        this.connectHandler && this.connectHandler(this);
+    }
+
+    /**
+     * 停止握手超时定时器
+     * @returns void
+     */
+    private stopHandshakeTimer() {
+        this.handshakeTimer && clearTimeout(this.handshakeTimer);
+        this.handshakeTimer = null;
+    }
+
+    /**
+     * 发送原始数据
+     * @param data 二进制数据
+     * @returns void
+     */
+    private sendRaw(data: ArrayBuffer) {
+        this.isConnected() && this.websocket && this.websocket.send(data);
+    }
+
+    /**
      * 断开连接
      * @returns void
      */
     public disconnect() {
+        this.stopHandshakeTimer();
+        this.handshake = undefined;
+        this.session = undefined;
+
         if (!this.websocket) {
             return
         }
@@ -245,15 +437,50 @@ export class Client {
      * @returns boolean
      */
     public send(message: Message): boolean {
-        if (this.isConnected()) {
-            const data = this.packer.packMessage(message);
+        if (!this.isConnected()) {
+            return false;
+        }
 
+        if (this.security && !this.session) {
+            return false;
+        }
+
+        // 打包错误（route/seq 溢出、消息过大）继续抛出，保持既有语义
+        const data = this.packer.packMessage(this.protect(message));
+
+        try {
             this.websocket && this.websocket.send(data);
 
             return true;
+        } catch (error) {
+            console.warn('[due] send message failed:', error);
+
+            return false;
+        }
+    }
+
+    /**
+     * 加密消息载荷
+     * @param message 消息
+     * @returns Message 加密后的消息
+     */
+    private protect(message: Message): Message {
+        if (!this.security) {
+            return message;
         }
 
-        return false;
+        if (!this.session) {
+            throw new Error('security: session is not established');
+        }
+
+        const buffer = this.session.seal(
+            message.buffer || new Uint8Array(0),
+            CLIENT_TO_SERVER,
+            message.route,
+            message.seq || 0,
+        );
+
+        return { seq: message.seq, route: message.route, buffer };
     }
 
     /**

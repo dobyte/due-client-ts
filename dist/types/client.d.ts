@@ -1,8 +1,16 @@
 import { Packer, Message } from "./packer";
+import { HandshakeVerifier, RandomSource } from "./security";
+export interface SecurityOptions {
+    verifier: HandshakeVerifier;
+    suites?: number[];
+    handshakeTimeout?: number;
+    random?: RandomSource;
+}
 export interface ClientOptions {
     url: string;
     packer: Packer;
     heartbeat: number;
+    security?: SecurityOptions;
 }
 export interface ConnectHandler {
     (client: Client): any;
@@ -28,10 +36,20 @@ export declare class Client {
     private opts;
     private websocket?;
     private intervalId;
+    private handshakeTimer;
     private packer;
+    private security?;
+    private handshake?;
+    private session?;
     private waitgroup;
     constructor(opts: ClientOptions);
     connect(): boolean;
+    private startHandshake;
+    private receiveHandshake;
+    private failHandshake;
+    private established;
+    private stopHandshakeTimer;
+    private sendRaw;
     disconnect(): void;
     private stopHeartbeat;
     private heartbeat;
@@ -43,6 +61,7 @@ export declare class Client {
     isConnected(): boolean;
     isConnecting(): boolean;
     send(message: Message): boolean;
+    private protect;
     request(route: number, buffer?: Uint8Array, timeout?: number): Promise<Message>;
     private invoke;
 }

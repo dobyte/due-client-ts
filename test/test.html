@@ -12,7 +12,41 @@
 
 </body>
 <script type="module">
-    import { Client, Packer } from '../dist/index.esm.js';
+    import { Client, Packer, Verifier, DEFAULT_SUITES } from '../dist/index.esm.js';
+
+    // 服务端公钥（与 Gate [crypto.ecc.signer] 私钥配对），来自同目录 resource/key.pub.pem
+    // 页面需通过 HTTP 服务打开，file:// 下 fetch 会被浏览器拦截
+    const SERVER_PUBLIC_KEY = await loadPublicKey();
+
+    /**
+     * 读取服务端公钥
+     * @returns {Promise<string>}
+     */
+    async function loadPublicKey() {
+        try {
+            const response = await fetch('./resource/key.pub.pem');
+
+            return response.ok ? (await response.text()).trim() : '';
+        } catch (error) {
+            console.warn('load server public key failed:', error);
+
+            return '';
+        }
+    }
+
+    // 会话安全配置；公钥为空时不启用安全握手
+    // 参数对齐 due-benchmark/cluster/ws/client/etc/etc.toml 的 [crypto.ecc.signer]
+    const security = SERVER_PUBLIC_KEY ? {
+        // ECDSA：Verifier.ecdsa(publicKey, hash?, delimiter?)
+        // RSA：Verifier.rsa(publicKey, hash?, pss?)
+        verifier: Verifier.ecdsa(SERVER_PUBLIC_KEY, 'sha256', ' '),
+        // 允许协商的 AEAD 套件，默认按 AES-256-GCM、ChaCha20-Poly1305 顺序协商
+        suites: DEFAULT_SUITES,
+        // 握手超时时间（毫秒），小于等于 0 表示不限制；默认 5000
+        handshakeTimeout: 5000,
+        // 运行环境未提供 crypto.getRandomValues 时注入随机字节源
+        // random: (length) => new Uint8Array(length),
+    } : undefined;
 
     // 请求数据包
     const buffer = (new TextEncoder).encode(JSON.stringify({
@@ -20,15 +54,24 @@
     }));
 
     // 创建客户端
+    // 参数对齐 due-benchmark/cluster/ws/client/etc/etc.toml
     const client = new Client({
         url: 'ws://127.0.0.1:3553',
-        heartbeat: 10000,
+        // heartbeatInterval = "0s"，压测示例关闭心跳
+        heartbeat: 0,
         packer: new Packer({
+            // [packet] byteOrder = "big"
             byteOrder: 'big',
-            seqBytes: 0,
+            // [packet] seqBytes = 4；request 的回包匹配依赖 seq
+            seqBytes: 4,
+            // [packet] routeBytes = 4
             routeBytes: 4,
+            // [packet] bufferBytes = 5000；启用 security 时明文上限为 bufferBytes - 25
+            //（epoch 1 + counter 8 + tag 16）
             bufferBytes: 5000
-        })
+        }),
+        // 启用会话安全；onConnect 会在握手完成后才触发
+        security: security
     });
 
     // 发送请求响应
@@ -84,15 +127,20 @@
         }, 1000);
     }
 
-    // 监听连接
+    // 监听连接（启用 security 时，握手成功后才触发）
     client.onConnect((c) => {
-        document.write('connect success', '<br/>');
+        document.write(security ? 'handshake & connect success' : 'connect success', '<br/>');
 
         // 发送同步请求，需要客户端和服务器同时开启seq配置
         request(c);
 
         // 发送异步消息
         // send(c);
+    });
+
+    // 监听错误（启用 security 时，签名校验失败、握手超时等都会触发）
+    client.onError(() => {
+        document.write('connect error', '<br/>');
     });
 
     // 监听连接断开

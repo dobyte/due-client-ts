@@ -11,7 +11,9 @@ export interface Message {
 }
 export interface Packet {
     isHeartbeat: boolean;
+    isHandshake: boolean;
     millisecond?: number;
+    handshake?: Uint8Array;
     message?: Message;
 }
 export declare class Packer {
@@ -23,6 +25,7 @@ export declare class Packer {
     constructor(opts?: PackerOptions);
     packHeartbeat(): ArrayBuffer;
     private doPackHeartbeat;
+    packHandshake(payload: Uint8Array): ArrayBuffer;
     packMessage(message: Message): ArrayBuffer;
-    unpack(data: any): Packet;
+    unpack(data: ArrayBuffer): Packet;
 }
